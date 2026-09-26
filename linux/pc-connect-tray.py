@@ -7,6 +7,8 @@ import urllib.error
 from urllib.parse import quote, unquote
 import subprocess
 import time
+import tempfile
+import threading
 
 from PyQt6.QtWidgets import (
     QApplication, QSystemTrayIcon, QMenu, QMainWindow, QWidget,
@@ -152,7 +154,7 @@ class PhoneExplorerWindow(QMainWindow):
         content_layout.addLayout(nav_layout)
 
         # Drop Zone & Progress Indicator
-        self.status_bar = QLabel("Double-click any folder to open, or double-click a file to download to PC Downloads.")
+        self.status_bar = QLabel("💡 Tip: Double-click a file to preview it temporarily. Right-click to download to PC.")
         self.status_bar.setStyleSheet("color: #88c0d0; font-size: 12px; padding: 4px;")
         content_layout.addWidget(self.status_bar)
 
@@ -272,7 +274,7 @@ class PhoneExplorerWindow(QMainWindow):
         if f.get('is_dir'):
             self.load_directory(f.get('path'))
         else:
-            self.download_file(f)
+            self.preview_file(f)
 
     def show_context_menu(self, pos):
         item = self.table.itemAt(pos)
@@ -284,11 +286,38 @@ class PhoneExplorerWindow(QMainWindow):
 
         menu = QMenu(self)
         if not f.get('is_dir'):
-            act_dl = menu.addAction("📥 Download to PC")
-            act_dl.triggered.connect(lambda: self.download_file(f))
+            act_dl = menu.addAction("📥 Download to PC (~/Downloads)")
+            act_dl.triggered.connect(lambda: self.download_selected() if len(self.table.selectedIndexes()) > 1 else self.download_file(f))
+            act_prev = menu.addAction("👁️ Preview (Open Temporarily)")
+            act_prev.triggered.connect(lambda: self.preview_file(f))
+            menu.addSeparator()
         act_del = menu.addAction("🗑️ Delete")
         act_del.triggered.connect(lambda: self.delete_file(f))
         menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def preview_file(self, f):
+        fn = f.get('name', 'file')
+        temp_dir = os.path.join(tempfile.gettempdir(), 'pc-connect-preview')
+        os.makedirs(temp_dir, exist_ok=True)
+        dest = os.path.join(temp_dir, fn)
+
+        self.status_bar.setText(f"⏳ Downloading temporary preview for {fn}...")
+
+        def fetch_and_open():
+            try:
+                url = f"{DAEMON_URL}/api/phone/files/download?path={quote(f.get('path'))}&preview=1"
+                req = urllib.request.Request(url)
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    with open(dest, 'wb') as out_f:
+                        while chunk := resp.read(65536):
+                            out_f.write(chunk)
+                subprocess.Popen(["xdg-open", dest])
+                QTimer.singleShot(0, lambda: self.status_bar.setText(f"👁️ Previewing {fn} in default viewer"))
+            except Exception as e:
+                err_msg = str(e)
+                QTimer.singleShot(0, lambda: self.status_bar.setText(f"❌ Preview failed: {err_msg}"))
+
+        threading.Thread(target=fetch_and_open, daemon=True).start()
 
     def download_selected(self):
         rows = set(index.row() for index in self.table.selectedIndexes())

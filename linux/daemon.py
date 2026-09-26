@@ -821,20 +821,32 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": "phone_unreachable", "message": str(e)}, status=502)
             return
 
-        elif path == '/api/phone/files/download':
+        elif path in ('/api/phone/files/download', '/api/phone/files/preview'):
             phone_ip, phone_port = get_phone_target()
             if not phone_ip:
                 self.send_error(503, "Phone is not connected")
                 return
             req_path = qs.get('path', [''])[0]
+            is_preview = (path == '/api/phone/files/preview') or (qs.get('preview', ['0'])[0] in ('1', 'true'))
             try:
                 target_url = f"http://{phone_ip}:{phone_port}/api/files/download?path={quote(req_path)}"
                 req = urllib.request.Request(target_url)
                 with urllib.request.urlopen(req, timeout=30) as resp:
                     self.send_response(200)
-                    for h, v in resp.headers.items():
-                        if h.lower() in ('content-type', 'content-length', 'content-disposition'):
-                            self.send_header(h, v)
+                    fn = os.path.basename(req_path)
+                    content_length = resp.headers.get('Content-Length')
+                    
+                    if is_preview:
+                        ctype, _ = mimetypes.guess_type(fn)
+                        ctype = ctype or 'application/octet-stream'
+                        self.send_header('Content-Type', ctype)
+                        self.send_header('Content-Disposition', f'inline; filename="{fn}"')
+                    else:
+                        self.send_header('Content-Type', 'application/octet-stream')
+                        self.send_header('Content-Disposition', f'attachment; filename="{fn}"')
+
+                    if content_length:
+                        self.send_header('Content-Length', content_length)
                     self.send_header('Access-Control-Allow-Origin', '*')
                     self.end_headers()
                     while chunk := resp.read(65536):
