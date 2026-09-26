@@ -40,23 +40,41 @@ It combines bi-directional file sharing, Dolphin context menus, remote phone sto
 - Copy text on Android $\rightarrow$ tap **"Copy to PC"** or share text to update the native KDE Plasma 6 clipboard (`org.kde.klipper`) instantly.
 - One-click clipboard sync from PC tray or terminal: `pc-connect clip`.
 
-### 🎵 4. Remote Media Player Control (MPRIS)
+### 🌐 4. Share Webpages Directly to PC Browser
+- **Instant Browser Opening:** Share any link from Chrome, Firefox, Brave, YouTube, or social media on your phone $\rightarrow$ select **"PC Connect"** $\rightarrow$ opens automatically in your default desktop browser (Zen, Firefox, Chrome, etc.) and copies the URL to your PC clipboard!
+- **On-Demand URL Launcher:** Tap **"Open Webpage"** directly in the phone app to type or paste any link to launch on your laptop immediately.
+
+### 🖱️ 5. Remote Trackpad & Wireless Mouse Pointer
+- **Kernel-Level `/dev/uinput` Virtual Driver:**
+  - Works globally across all Wayland and XWayland windows, games, and lock screens with zero external dependencies.
+  - Sub-millisecond latency via direct UDP stream (port `1762`) with automatic HTTP fallback.
+- **Intuitive Gestures & Tactile Controls:**
+  - ☝️ **1-Finger Drag:** Smooth cursor movement with acceleration.
+  - ☝️ **1-Finger Tap:** Left Click with subtle haptic vibration.
+  - ✌️ **2-Finger Scroll:** Smooth vertical and horizontal page scrolling.
+  - ✌️ **2-Finger Tap:** Right Click context menu.
+  - 👆 **Double-Tap & Drag:** Hold to select text, move windows, and drag-and-drop.
+  - 🖱️ **Physical Buttons:** Dedicated Left, Right, and Middle click buttons (with hold-to-drag support).
+  - ⌨️ **Quick Typing:** Send text or links directly from the trackpad screen.
+  - ⚙️ **Customizable Sensitivity:** Adjust tracking speed on the fly (0.4x - 3.0x).
+
+### 🎵 6. Remote Media Player Control (MPRIS)
 - Control desktop media playback directly from your phone app:
   - Real-time track title, artist, and playback status for Spotify, VLC, Firefox, Zen Browser, Elisa, Chrome, etc.
   - Controls: ⏯️ Play/Pause, ⏮️ Previous, ⏭️ Next, 🔉 Volume Down, 🔊 Volume Up.
   - CLI control: `pc-connect media play|pause|next|prev|volup|voldown`.
 
-### 🔔 5. Find My Phone & Ping PC
+### 🔔 7. Find My Phone & Ping PC
 - **Find My Phone:** Click **"Find My Phone"** in the PC tray or run `pc-connect ring` $\rightarrow$ phone rings at maximum alarm volume and vibrates with an on-screen "Dismiss Alarm" button.
 - **Ping PC:** Tap **"Ring Laptop"** on your phone $\rightarrow$ PC plays loud incoming call chime and displays an urgent desktop alert.
 
-### 🔒 6. Passwordless Mobile Unlock & Biometrics
+### 🔒 8. Passwordless Mobile Unlock & Biometrics
 - **Passwordless Mobile Unlock:** Leave the password field blank and hit `Enter` on your lock screen $\rightarrow$ Phone lights up and scans fingerprint $\rightarrow$ **Laptop unlocks instantly!**
 - **Strict 2FA Mode:** Type your Linux password first, followed by phone biometric approval.
 - **Hardware USB Token Mode:** Plug your phone in via USB cable to unlock instantly with zero wireless network needed.
 - **Remote Lock:** Tap **"Lock PC"** on phone to immediately lock the session via `loginctl lock-session`.
 
-### 🔋 7. Native KDE System Tray & Phone Status
+### 🔋 9. Native KDE System Tray & Phone Status
 - Sits in your KDE Plasma panel with live connection status.
 - Real-time phone battery level and charging state (e.g. `OPPO CPH2505 • 85% ⚡`).
 - Quick access to all sharing, browsing, ringing, and locking features.

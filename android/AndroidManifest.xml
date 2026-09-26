@@ -65,6 +65,12 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".TrackpadActivity"
+            android:label="Remote Trackpad"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
         <service
             android:name=".AuthService"
             android:exported="false" />

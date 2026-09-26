@@ -65,6 +65,8 @@ public class MainActivity extends Activity {
     private Button btnGetClipFromPc;
     private Button btnRingPc;
     private Button btnLockPc;
+    private Button btnRemoteTrackpad;
+    private Button btnOpenWebpage;
 
     private TextView tvMediaStatus;
     private TextView tvMediaTitle;
@@ -163,6 +165,8 @@ public class MainActivity extends Activity {
         btnGetClipFromPc = findViewById(R.id.btn_get_clip_from_pc);
         btnRingPc = findViewById(R.id.btn_ring_pc);
         btnLockPc = findViewById(R.id.btn_lock_pc);
+        btnRemoteTrackpad = findViewById(R.id.btn_remote_trackpad);
+        btnOpenWebpage = findViewById(R.id.btn_open_webpage);
 
         tvMediaStatus = findViewById(R.id.tv_media_status);
         tvMediaTitle = findViewById(R.id.tv_media_title);
@@ -1029,6 +1033,15 @@ public class MainActivity extends Activity {
         if (btnGetClipFromPc != null) btnGetClipFromPc.setOnClickListener(v -> fetchPcClipboard());
         if (btnRingPc != null) btnRingPc.setOnClickListener(v -> ringPc());
         if (btnLockPc != null) btnLockPc.setOnClickListener(v -> lockPc());
+        if (btnRemoteTrackpad != null) {
+            btnRemoteTrackpad.setOnClickListener(v -> {
+                Intent intent = new Intent(MainActivity.this, TrackpadActivity.class);
+                startActivity(intent);
+            });
+        }
+        if (btnOpenWebpage != null) {
+            btnOpenWebpage.setOnClickListener(v -> showOpenWebpageDialog());
+        }
 
         if (btnMediaPlayPause != null) btnMediaPlayPause.setOnClickListener(v -> sendMediaCommand("PlayPause"));
         if (btnMediaPrev != null) btnMediaPrev.setOnClickListener(v -> sendMediaCommand("Previous"));
@@ -1244,6 +1257,70 @@ public class MainActivity extends Activity {
                 runOnUiThread(() -> Toast.makeText(MainActivity.this, "❌ Error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
             }
         }).start();
+    }
+
+    private void showOpenWebpageDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("🌐 Open Webpage on PC");
+        final EditText input = new EditText(this);
+        input.setHint("https://example.com");
+        input.setSingleLine(true);
+        input.setPadding(40, 30, 40, 30);
+        try {
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null && cm.hasPrimaryClip() && cm.getPrimaryClip().getItemCount() > 0) {
+                CharSequence clip = cm.getPrimaryClip().getItemAt(0).getText();
+                if (clip != null && (clip.toString().startsWith("http://") || clip.toString().startsWith("https://"))) {
+                    input.setText(clip.toString());
+                    input.setSelection(clip.length());
+                }
+            }
+        } catch (Exception ignored) {}
+
+        builder.setView(input);
+
+        builder.setPositiveButton("Open on PC", (dialog, which) -> {
+            String url = input.getText().toString().trim();
+            if (url.isEmpty()) return;
+            if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                url = "https://" + url;
+            }
+            final String finalUrl = url;
+            Toast.makeText(this, "🌐 Opening on PC browser...", Toast.LENGTH_SHORT).show();
+
+            new Thread(() -> {
+                try {
+                    PairedDevice active = DeviceManager.getActiveDevice(this);
+                    String endpoint = active.getBaseUrl() + "/api/open_url";
+                    HttpURLConnection conn = (HttpURLConnection) new URL(endpoint).openConnection();
+                    conn.setRequestMethod("POST");
+                    conn.setRequestProperty("Content-Type", "application/json");
+                    if (active.isPaired()) {
+                        conn.setRequestProperty("Authorization", "Bearer " + active.authToken);
+                    }
+                    conn.setDoOutput(true);
+                    conn.setConnectTimeout(5000);
+                    conn.setReadTimeout(5000);
+                    JSONObject body = new JSONObject().put("url", finalUrl);
+                    try (OutputStream os = conn.getOutputStream()) {
+                        os.write(body.toString().getBytes("UTF-8"));
+                    }
+                    int code = conn.getResponseCode();
+                    runOnUiThread(() -> {
+                        if (code == 200) {
+                            Toast.makeText(MainActivity.this, "✅ Opened in PC browser!", Toast.LENGTH_SHORT).show();
+                        } else {
+                            Toast.makeText(MainActivity.this, "❌ Failed to open (HTTP " + code + ")", Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                } catch (Exception e) {
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "❌ Error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+                }
+            }).start();
+        });
+
+        builder.setNegativeButton("Cancel", null);
+        builder.show();
     }
 
     private void sendMediaCommand(String command) {

@@ -108,13 +108,27 @@ configure_firewall() {
         echo -e "${CYAN}[*] Configuring firewall rules (UFW)...${NC}"
         ufw allow 1760/tcp comment 'PC Authenticator Web/API' >/dev/null 2>&1 || true
         ufw allow 1760/udp comment 'PC Authenticator Discovery' >/dev/null 2>&1 || true
-        echo -e "${GREEN}[✓] Firewall port 1760 (TCP/UDP) allowed.${NC}"
+        ufw allow 1762/udp comment 'PC Authenticator Trackpad' >/dev/null 2>&1 || true
+        echo -e "${GREEN}[✓] Firewall ports 1760 (TCP/UDP) & 1762 (UDP Trackpad) allowed.${NC}"
     elif command -v firewall-cmd >/dev/null 2>&1; then
         echo -e "${CYAN}[*] Configuring firewalld rules...${NC}"
         firewall-cmd --add-port=1760/tcp --permanent >/dev/null 2>&1 || true
         firewall-cmd --add-port=1760/udp --permanent >/dev/null 2>&1 || true
+        firewall-cmd --add-port=1762/udp --permanent >/dev/null 2>&1 || true
         firewall-cmd --reload >/dev/null 2>&1 || true
-        echo -e "${GREEN}[✓] Firewalld port 1760 allowed.${NC}"
+        echo -e "${GREEN}[✓] Firewalld ports 1760 & 1762 allowed.${NC}"
+    fi
+
+    # Ensure uinput permissions for Remote Trackpad / Mouse pointer
+    if [ "$EUID" -eq 0 ]; then
+        modprobe uinput >/dev/null 2>&1 || true
+        mkdir -p /etc/udev/rules.d /etc/modules-load.d
+        echo "uinput" > /etc/modules-load.d/uinput.conf 2>/dev/null || true
+        cat <<EOF > /etc/udev/rules.d/99-pc-connect-uinput.rules
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"
+EOF
+        udevadm control --reload-rules >/dev/null 2>&1 || true
+        udevadm trigger --sysname-match=uinput >/dev/null 2>&1 || true
     fi
 }
 

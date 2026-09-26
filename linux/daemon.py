@@ -14,6 +14,8 @@ import hashlib
 import random
 import shutil
 import mimetypes
+import struct
+import fcntl
 from urllib.parse import urlparse, parse_qs, unquote, quote
 import urllib.request
 import urllib.error
@@ -293,6 +295,151 @@ def notify_file_received(filename, filepath):
             subprocess.Popen(['xdg-open', downloads_dir])
     except Exception:
         pass
+
+# ==========================================
+# Virtual Mouse & Input Controller (/dev/uinput)
+# ==========================================
+
+UI_SET_EVBIT = 0x40045564
+UI_SET_KEYBIT = 0x40045565
+UI_SET_RELBIT = 0x40045566
+UI_DEV_CREATE = 0x5501
+UI_DEV_DESTROY = 0x5502
+
+EV_SYN = 0x00
+EV_KEY = 0x01
+EV_REL = 0x02
+
+REL_X = 0x00
+REL_Y = 0x01
+REL_WHEEL = 0x08
+REL_HWHEEL = 0x06
+
+BTN_LEFT = 0x110
+BTN_RIGHT = 0x111
+BTN_MIDDLE = 0x112
+
+class VirtualMouse:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.fd = None
+        try:
+            self.fd = os.open('/dev/uinput', os.O_WRONLY | os.O_NONBLOCK)
+            fcntl.ioctl(self.fd, UI_SET_EVBIT, EV_KEY)
+            for btn in (BTN_LEFT, BTN_RIGHT, BTN_MIDDLE):
+                fcntl.ioctl(self.fd, UI_SET_KEYBIT, btn)
+
+            fcntl.ioctl(self.fd, UI_SET_EVBIT, EV_REL)
+            for rel in (REL_X, REL_Y, REL_WHEEL, REL_HWHEEL):
+                fcntl.ioctl(self.fd, UI_SET_RELBIT, rel)
+
+            name = b"PC Connect Virtual Mouse".ljust(80, b'\x00')
+            input_id = struct.pack('HHHH', 0x03, 0x1234, 0x5678, 1)
+            user_dev = name + input_id + struct.pack('I', 0) + b'\x00' * (64 * 4 * 4)
+            os.write(self.fd, user_dev)
+            fcntl.ioctl(self.fd, UI_DEV_CREATE)
+            sys.stderr.write("  Virtual Mouse (/dev/uinput) initialized successfully\n")
+            sys.stderr.flush()
+        except Exception as e:
+            sys.stderr.write(f"Warning: Cannot initialize /dev/uinput: {e}\n")
+            self.fd = None
+
+    def emit(self, ev_type, ev_code, val):
+        if not self.fd:
+            return
+        now = time.time()
+        sec = int(now)
+        usec = int((now - sec) * 1000000)
+        data = struct.pack('qqHHi', sec, usec, ev_type, ev_code, int(val))
+        os.write(self.fd, data)
+
+    def move(self, dx, dy):
+        if not self.fd:
+            return
+        with self.lock:
+            if dx != 0:
+                self.emit(EV_REL, REL_X, dx)
+            if dy != 0:
+                self.emit(EV_REL, REL_Y, dy)
+            self.emit(EV_SYN, 0, 0)
+
+    def click(self, button="left"):
+        if not self.fd:
+            return
+        with self.lock:
+            code = BTN_RIGHT if button == "right" else (BTN_MIDDLE if button == "middle" else BTN_LEFT)
+            self.emit(EV_KEY, code, 1)
+            self.emit(EV_SYN, 0, 0)
+            self.emit(EV_KEY, code, 0)
+            self.emit(EV_SYN, 0, 0)
+
+    def mouse_down(self, button="left"):
+        if not self.fd:
+            return
+        with self.lock:
+            code = BTN_RIGHT if button == "right" else (BTN_MIDDLE if button == "middle" else BTN_LEFT)
+            self.emit(EV_KEY, code, 1)
+            self.emit(EV_SYN, 0, 0)
+
+    def mouse_up(self, button="left"):
+        if not self.fd:
+            return
+        with self.lock:
+            code = BTN_RIGHT if button == "right" else (BTN_MIDDLE if button == "middle" else BTN_LEFT)
+            self.emit(EV_KEY, code, 0)
+            self.emit(EV_SYN, 0, 0)
+
+    def scroll(self, dy, dx=0):
+        if not self.fd:
+            return
+        with self.lock:
+            if dy != 0:
+                self.emit(EV_REL, REL_WHEEL, dy)
+            if dx != 0:
+                self.emit(EV_REL, REL_HWHEEL, dx)
+            self.emit(EV_SYN, 0, 0)
+
+    def close(self):
+        if self.fd:
+            try:
+                fcntl.ioctl(self.fd, UI_DEV_DESTROY)
+                os.close(self.fd)
+            except Exception:
+                pass
+            self.fd = None
+
+virtual_mouse = VirtualMouse()
+
+def start_udp_mouse_listener(port=1762):
+    def mouse_loop():
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(('0.0.0.0', port))
+            sys.stderr.write(f"  UDP Mouse Trackpad Listener active on port {port}\n")
+            sys.stderr.flush()
+            while True:
+                data, addr = sock.recvfrom(2048)
+                try:
+                    payload = json.loads(data.decode('utf-8'))
+                    mtype = payload.get('type', '')
+                    if mtype == 'move':
+                        virtual_mouse.move(payload.get('dx', 0), payload.get('dy', 0))
+                    elif mtype == 'click':
+                        virtual_mouse.click(payload.get('button', 'left'))
+                    elif mtype == 'down':
+                        virtual_mouse.mouse_down(payload.get('button', 'left'))
+                    elif mtype == 'up':
+                        virtual_mouse.mouse_up(payload.get('button', 'left'))
+                    elif mtype == 'scroll':
+                        virtual_mouse.scroll(payload.get('dy', 0), payload.get('dx', 0))
+                except Exception:
+                    pass
+        except Exception as e:
+            sys.stderr.write(f"UDP mouse listener error: {e}\n")
+
+    t = threading.Thread(target=mouse_loop, daemon=True)
+    t.start()
 
 # ==========================================
 # Auth Manager
@@ -1056,6 +1203,48 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self.send_json({"error": "mkdir_failed", "message": str(e)}, status=502)
 
+        # 12. Open Webpage / URL in default browser
+        elif path == '/api/open_url':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
+            url = body.get('url', '').strip()
+            if url and (url.startswith('http://') or url.startswith('https://')):
+                try:
+                    subprocess.Popen(['xdg-open', url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    set_kde_clipboard(url)
+                    try:
+                        subprocess.Popen(['notify-send', '-i', 'applications-internet', '-a', 'PC Connect', '🌐 Webpage Received', url], stderr=subprocess.DEVNULL)
+                    except Exception:
+                        pass
+                    self.send_json({"status": "ok", "url": url})
+                except Exception as e:
+                    self.send_json({"error": str(e)}, status=500)
+            else:
+                self.send_json({"error": "invalid_url", "message": "URL must start with http:// or https://"}, status=400)
+
+        # 13. Virtual Mouse / Trackpad (HTTP fallback)
+        elif path == '/api/mouse':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
+            mtype = body.get('type', '')
+            if mtype == 'move':
+                virtual_mouse.move(body.get('dx', 0), body.get('dy', 0))
+            elif mtype == 'click':
+                virtual_mouse.click(body.get('button', 'left'))
+            elif mtype == 'down':
+                virtual_mouse.mouse_down(body.get('button', 'left'))
+            elif mtype == 'up':
+                virtual_mouse.mouse_up(body.get('button', 'left'))
+            elif mtype == 'scroll':
+                virtual_mouse.scroll(body.get('dy', 0), body.get('dx', 0))
+            self.send_json({"status": "ok"})
+
         else:
             self.send_error(404, "Not Found")
 
@@ -1367,6 +1556,7 @@ def main():
 
     start_udp_discovery_server(port)
     start_udp_beacon(port)
+    start_udp_mouse_listener(1762)
 
     server = ThreadingHTTPServer(('0.0.0.0', port), AuthenticatorHandler)
     sys.stderr.write("==================================================\n")

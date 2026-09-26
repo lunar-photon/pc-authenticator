@@ -20,6 +20,8 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.util.ArrayList;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class ShareActivity extends Activity {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -48,15 +50,37 @@ public class ShareActivity extends Activity {
     private void handleSendText(Intent intent) {
         String sharedText = intent.getStringExtra(Intent.EXTRA_TEXT);
         if (sharedText == null || sharedText.isEmpty()) {
-            finish();
-            return;
+            if (intent.getDataString() != null) {
+                sharedText = intent.getDataString();
+            } else {
+                finish();
+                return;
+            }
         }
 
-        Toast.makeText(this, "📋 Sending text to PC Clipboard...", Toast.LENGTH_SHORT).show();
+        String targetUrl = null;
+        Matcher m = Pattern.compile("https?://[^\\s]+").matcher(sharedText);
+        if (m.find()) {
+            targetUrl = m.group();
+        }
+
+        final boolean isWebpage = (targetUrl != null && !targetUrl.isEmpty());
+        final String payloadUrl = targetUrl;
+        final String fullText = sharedText;
+
+        mainHandler.post(() -> {
+            if (isWebpage) {
+                Toast.makeText(ShareActivity.this, "🌐 Opening webpage on PC...", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(ShareActivity.this, "📋 Sending text to PC Clipboard...", Toast.LENGTH_SHORT).show();
+            }
+        });
+
         new Thread(() -> {
             try {
                 PairedDevice active = DeviceManager.getActiveDevice(this);
-                String urlStr = active.getBaseUrl() + "/api/clipboard";
+                String endpoint = isWebpage ? "/api/open_url" : "/api/clipboard";
+                String urlStr = active.getBaseUrl() + endpoint;
                 HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json");
@@ -64,16 +88,27 @@ public class ShareActivity extends Activity {
                     conn.setRequestProperty("Authorization", "Bearer " + active.authToken);
                 }
                 conn.setDoOutput(true);
-                JSONObject body = new JSONObject().put("text", sharedText);
+                conn.setConnectTimeout(5000);
+                conn.setReadTimeout(5000);
+                JSONObject body = new JSONObject();
+                if (isWebpage) {
+                    body.put("url", payloadUrl);
+                } else {
+                    body.put("text", fullText);
+                }
                 try (OutputStream os = conn.getOutputStream()) {
                     os.write(body.toString().getBytes("UTF-8"));
                 }
                 int code = conn.getResponseCode();
                 mainHandler.post(() -> {
                     if (code == 200) {
-                        Toast.makeText(ShareActivity.this, "✅ Copied to PC Clipboard!", Toast.LENGTH_SHORT).show();
+                        if (isWebpage) {
+                            Toast.makeText(ShareActivity.this, "✅ Webpage opened in PC browser!", Toast.LENGTH_SHORT).show();
+                        } else {
+                            Toast.makeText(ShareActivity.this, "✅ Copied to PC Clipboard!", Toast.LENGTH_SHORT).show();
+                        }
                     } else {
-                        Toast.makeText(ShareActivity.this, "❌ Failed to send text (HTTP " + code + ")", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(ShareActivity.this, "❌ Failed to send (HTTP " + code + ")", Toast.LENGTH_SHORT).show();
                     }
                 });
             } catch (Exception e) {
