@@ -88,6 +88,7 @@ EOF
         if [ -f "$SCRIPT_DIR/pc_connect.desktop" ]; then
             cp -f "$SCRIPT_DIR/pc_connect.desktop" "$TARGET_HOME/.local/share/kio/servicemenus/pc_connect.desktop"
             chown "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.local/share/kio/servicemenus/pc_connect.desktop" 2>/dev/null || true
+            chmod 755 "$TARGET_HOME/.local/share/kio/servicemenus/pc_connect.desktop"
         fi
 
         # Install Autostart and Desktop Application Launcher
@@ -95,10 +96,12 @@ EOF
         if [ -f "$SCRIPT_DIR/pc-connect-tray.desktop" ]; then
             cp -f "$SCRIPT_DIR/pc-connect-tray.desktop" "$TARGET_HOME/.config/autostart/pc-connect-tray.desktop"
             chown "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.config/autostart/pc-connect-tray.desktop" 2>/dev/null || true
+            chmod 755 "$TARGET_HOME/.config/autostart/pc-connect-tray.desktop"
         fi
         if [ -f "$SCRIPT_DIR/pc-connect.desktop" ]; then
             cp -f "$SCRIPT_DIR/pc-connect.desktop" "$TARGET_HOME/.local/share/applications/pc-connect.desktop"
             chown "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.local/share/applications/pc-connect.desktop" 2>/dev/null || true
+            chmod 755 "$TARGET_HOME/.local/share/applications/pc-connect.desktop"
             sudo -u "$TARGET_USER" update-desktop-database "$TARGET_HOME/.local/share/applications" 2>/dev/null || true
         fi
     fi
