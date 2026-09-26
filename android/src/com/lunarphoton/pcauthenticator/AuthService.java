@@ -72,6 +72,10 @@ public class AuthService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        try {
+            android.os.StrictMode.VmPolicy.Builder builder = new android.os.StrictMode.VmPolicy.Builder();
+            android.os.StrictMode.setVmPolicy(builder.build());
+        } catch (Exception ignored) {}
         createNotificationChannels();
 
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
@@ -651,38 +655,48 @@ public class AuthService extends Service {
     }
 
     private void showFileNotification(File file) {
-        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        if (nm == null) return;
+        try {
+            NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm == null) return;
 
-        Intent viewIntent = new Intent(Intent.ACTION_VIEW);
-        Uri fileUri;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            viewIntent.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            fileUri = Uri.parse("file://" + file.getAbsolutePath());
-        } else {
-            fileUri = Uri.fromFile(file);
+            Intent viewIntent = new Intent(Intent.ACTION_VIEW);
+            Uri fileUri = FileServer.getContentUriForPath(this, file.getAbsolutePath());
+            if (fileUri != null) {
+                viewIntent.setDataAndType(fileUri, "*/*");
+                viewIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } else {
+                viewIntent = new Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS);
+            }
+            viewIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+            PendingIntent pi = PendingIntent.getActivity(
+                    this, (int) System.currentTimeMillis(), viewIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0)
+            );
+
+            Notification.Builder builder;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                builder = new Notification.Builder(this, FileServer.CHANNEL_FILE);
+            } else {
+                builder = new Notification.Builder(this);
+            }
+
+            builder.setContentTitle("📁 File Received from PC")
+                    .setContentText(file.getName() + " (" + Math.max(1, file.length() / 1024) + " KB)")
+                    .setSmallIcon(R.mipmap.ic_launcher)
+                    .setAutoCancel(true)
+                    .setContentIntent(pi);
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                builder.setPriority(Notification.PRIORITY_HIGH)
+                        .setVibrate(new long[]{0, 250, 150, 250});
+            }
+
+            nm.notify((int) (FileServer.NOTIF_BASE_ID + (System.currentTimeMillis() % 1000)), builder.build());
+            Log.i(TAG, "Notification posted for incoming file: " + file.getName());
+        } catch (Throwable t) {
+            Log.e(TAG, "Error posting file notification: " + t.getMessage(), t);
         }
-        viewIntent.setDataAndType(fileUri, "*/*");
-
-        PendingIntent pi = PendingIntent.getActivity(
-                this, (int) System.currentTimeMillis(), viewIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0)
-        );
-
-        Notification.Builder builder;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            builder = new Notification.Builder(this, FileServer.CHANNEL_FILE);
-        } else {
-            builder = new Notification.Builder(this);
-        }
-
-        builder.setContentTitle("📁 File Received from PC")
-                .setContentText(file.getName() + " (" + (file.length() / 1024) + " KB)")
-                .setSmallIcon(R.mipmap.ic_launcher)
-                .setAutoCancel(true)
-                .setContentIntent(pi);
-
-        nm.notify((int) (FileServer.NOTIF_BASE_ID + (System.currentTimeMillis() % 1000)), builder.build());
     }
 
     private void initTelephonyListener() {

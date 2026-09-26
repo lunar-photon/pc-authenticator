@@ -60,6 +60,10 @@ public class FileServer {
 
     public FileServer(Context context) {
         this.context = context;
+        try {
+            android.os.StrictMode.VmPolicy.Builder builder = new android.os.StrictMode.VmPolicy.Builder();
+            android.os.StrictMode.setVmPolicy(builder.build());
+        } catch (Exception ignored) {}
         createNotificationChannel();
     }
 
@@ -86,9 +90,11 @@ public class FileServer {
                 NotificationChannel chan = new NotificationChannel(
                         CHANNEL_FILE,
                         "PC Connect File Transfers",
-                        NotificationManager.IMPORTANCE_DEFAULT
+                        NotificationManager.IMPORTANCE_HIGH
                 );
                 chan.setDescription("Notifications for files received from PC");
+                chan.enableVibration(true);
+                chan.enableLights(true);
                 nm.createNotificationChannel(chan);
             }
         }
@@ -300,7 +306,7 @@ public class FileServer {
         }
     }
 
-    private Uri getContentUriForPath(String path) {
+    public static Uri getContentUriForPath(Context context, String path) {
         try {
             Uri queryUri = MediaStore.Files.getContentUri("external");
             String[] projection = { MediaStore.MediaColumns._ID };
@@ -314,6 +320,10 @@ public class FileServer {
             }
         } catch (Exception ignored) {}
         return null;
+    }
+
+    private Uri getContentUriForPath(String path) {
+        return getContentUriForPath(context, path);
     }
 
     private void addShortcut(JSONArray arr, String name, String path) throws Exception {
@@ -556,38 +566,48 @@ public class FileServer {
     }
 
     private void showFileReceivedNotification(File file) {
-        NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
-        if (nm == null) return;
+        try {
+            NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm == null) return;
 
-        Intent viewIntent = new Intent(Intent.ACTION_VIEW);
-        Uri fileUri;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            viewIntent.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            fileUri = Uri.parse("file://" + file.getAbsolutePath());
-        } else {
-            fileUri = Uri.fromFile(file);
+            Intent viewIntent = new Intent(Intent.ACTION_VIEW);
+            Uri fileUri = getContentUriForPath(context, file.getAbsolutePath());
+            if (fileUri != null) {
+                viewIntent.setDataAndType(fileUri, "*/*");
+                viewIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } else {
+                viewIntent = new Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS);
+            }
+            viewIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+            PendingIntent pi = PendingIntent.getActivity(
+                    context, (int) System.currentTimeMillis(), viewIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0)
+            );
+
+            android.app.Notification.Builder builder;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                builder = new android.app.Notification.Builder(context, CHANNEL_FILE);
+            } else {
+                builder = new android.app.Notification.Builder(context);
+            }
+
+            builder.setContentTitle("📁 File Received from PC")
+                    .setContentText(file.getName() + " (" + Math.max(1, file.length() / 1024) + " KB)")
+                    .setSmallIcon(R.mipmap.ic_launcher)
+                    .setAutoCancel(true)
+                    .setContentIntent(pi);
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                builder.setPriority(android.app.Notification.PRIORITY_HIGH)
+                        .setVibrate(new long[]{0, 250, 150, 250});
+            }
+
+            nm.notify((int) (NOTIF_BASE_ID + (System.currentTimeMillis() % 1000)), builder.build());
+            Log.i(TAG, "Notification posted for received file: " + file.getName());
+        } catch (Throwable t) {
+            Log.e(TAG, "Error posting file notification: " + t.getMessage(), t);
         }
-        viewIntent.setDataAndType(fileUri, "*/*");
-
-        PendingIntent pi = PendingIntent.getActivity(
-                context, (int) System.currentTimeMillis(), viewIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0)
-        );
-
-        android.app.Notification.Builder builder;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            builder = new android.app.Notification.Builder(context, CHANNEL_FILE);
-        } else {
-            builder = new android.app.Notification.Builder(context);
-        }
-
-        builder.setContentTitle("📁 File Received from PC")
-                .setContentText(file.getName() + " (" + (file.length() / 1024) + " KB)")
-                .setSmallIcon(R.mipmap.ic_launcher)
-                .setAutoCancel(true)
-                .setContentIntent(pi);
-
-        nm.notify((int) (NOTIF_BASE_ID + (System.currentTimeMillis() % 1000)), builder.build());
     }
 
     private void sendOptions(OutputStream out) throws Exception {
