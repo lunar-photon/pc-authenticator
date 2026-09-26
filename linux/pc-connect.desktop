@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=PC Connect
+GenericName=Phone Integration & File Transfer
+Comment=Replacement for KDE Connect: File Sharing, Remote Browsing, Clipboard, Media & 2FA
+Exec=/home/lunarphoton/.local/bin/pc-connect browse
+Icon=smartphone
+Terminal=false
+Categories=Utility;Network;FileTransfer;
+Keywords=kdeconnect;phone;transfer;browse;share;auth;

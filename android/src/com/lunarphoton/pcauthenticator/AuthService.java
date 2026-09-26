@@ -7,6 +7,8 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.net.Uri;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.os.Build;
@@ -26,6 +28,16 @@ import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
+import android.os.BatteryManager;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.media.MediaScannerConnection;
+import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 
 public class AuthService extends Service {
     private static final String TAG = "PCAuthService";
@@ -44,6 +56,7 @@ public class AuthService extends Service {
     private volatile HttpURLConnection currentConn = null;
     private Thread workerThread;
     private PowerManager.WakeLock wakeLock;
+    private FileServer fileServer;
 
     @Override
     public void onCreate() {
@@ -55,6 +68,9 @@ public class AuthService extends Service {
             wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PCAuth::ListeningLock");
             wakeLock.acquire(10 * 60 * 1000L); // 10 minutes, refreshed periodically
         }
+
+        fileServer = new FileServer(this);
+        fileServer.start();
 
         startUdpBeaconListener();
     }
@@ -146,6 +162,7 @@ public class AuthService extends Service {
                     consecutiveFails = 0;
                     broadcastStatus(true, "Connected • 🔒 E2E Secure");
                     updateForegroundNotification("Connected to " + active.hostname + " (Secure)");
+                    sendPhoneStatusToPc(active);
 
                     try (InputStream is = conn.getInputStream();
                          BufferedReader reader = new BufferedReader(new InputStreamReader(is, "UTF-8"))) {
@@ -163,6 +180,12 @@ public class AuthService extends Service {
                                     cancelChallengeNotification(AuthService.this);
                                     Intent updateIntent = new Intent("com.lunarphoton.pcauthenticator.CHALLENGE_RESOLVED");
                                     sendBroadcast(updateIntent);
+                                } else if ("ring".equals(event)) {
+                                    RingManager.startAlarm(AuthService.this);
+                                } else if ("clipboard".equals(event)) {
+                                    handleClipboardEvent(json);
+                                } else if ("incoming_file".equals(event)) {
+                                    handleIncomingFileEvent(json);
                                 }
                             } catch (Exception e) {
                                 Log.e(TAG, "JSON parse error", e);
@@ -473,9 +496,142 @@ public class AuthService extends Service {
         }
     }
 
+    private void sendPhoneStatusToPc(PairedDevice active) {
+        if (active == null) return;
+        new Thread(() -> {
+            try {
+                Intent batteryIntent = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+                int level = -1;
+                boolean isCharging = false;
+                if (batteryIntent != null) {
+                    int rawLevel = batteryIntent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+                    int scale = batteryIntent.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
+                    if (rawLevel >= 0 && scale > 0) {
+                        level = (rawLevel * 100) / scale;
+                    }
+                    int status = batteryIntent.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
+                    isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                                 status == BatteryManager.BATTERY_STATUS_FULL;
+                }
+
+                JSONObject body = new JSONObject();
+                if (level >= 0) body.put("battery", level);
+                body.put("charging", isCharging);
+                body.put("port", FileServer.PORT);
+
+                HttpURLConnection conn = (HttpURLConnection) new URL(active.getBaseUrl() + "/api/phone/status").openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Content-Type", "application/json");
+                if (active.isPaired()) {
+                    conn.setRequestProperty("Authorization", "Bearer " + active.authToken);
+                }
+                conn.setDoOutput(true);
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write(body.toString().getBytes("UTF-8"));
+                }
+                conn.getResponseCode();
+                conn.disconnect();
+            } catch (Exception ignored) {}
+        }).start();
+    }
+
+    private void handleClipboardEvent(JSONObject json) {
+        String text = json.optString("text", "");
+        if (!text.isEmpty()) {
+            new Handler(Looper.getMainLooper()).post(() -> {
+                try {
+                    ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                    if (cm != null) {
+                        cm.setPrimaryClip(ClipData.newPlainText("PC Connect", text));
+                    }
+                } catch (Exception ignored) {}
+            });
+        }
+    }
+
+    private void handleIncomingFileEvent(JSONObject json) {
+        String downloadUrl = json.optString("download_url", "");
+        String filename = json.optString("filename", "received_file");
+        if (downloadUrl.isEmpty()) return;
+
+        new Thread(() -> {
+            try {
+                File destDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+                if (!destDir.exists()) destDir.mkdirs();
+                File dest = new File(destDir, filename);
+                int c = 1;
+                String base = filename;
+                String ext = "";
+                int dot = filename.lastIndexOf(".");
+                if (dot > 0) {
+                    base = filename.substring(0, dot);
+                    ext = filename.substring(dot);
+                }
+                while (dest.exists()) {
+                    dest = new File(destDir, base + " (" + c + ")" + ext);
+                    c++;
+                }
+
+                HttpURLConnection conn = (HttpURLConnection) new URL(downloadUrl).openConnection();
+                conn.setConnectTimeout(10000);
+                conn.setReadTimeout(60000);
+                try (InputStream in = conn.getInputStream();
+                     FileOutputStream fos = new FileOutputStream(dest)) {
+                    byte[] buf = new byte[65536];
+                    int r;
+                    while ((r = in.read(buf)) != -1) {
+                        fos.write(buf, 0, r);
+                    }
+                }
+                MediaScannerConnection.scanFile(this, new String[]{dest.getAbsolutePath()}, null, null);
+                showFileNotification(dest);
+            } catch (Exception e) {
+                Log.e(TAG, "Error downloading incoming file", e);
+            }
+        }).start();
+    }
+
+    private void showFileNotification(File file) {
+        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm == null) return;
+
+        Intent viewIntent = new Intent(Intent.ACTION_VIEW);
+        Uri fileUri;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            viewIntent.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            fileUri = Uri.parse("file://" + file.getAbsolutePath());
+        } else {
+            fileUri = Uri.fromFile(file);
+        }
+        viewIntent.setDataAndType(fileUri, "*/*");
+
+        PendingIntent pi = PendingIntent.getActivity(
+                this, (int) System.currentTimeMillis(), viewIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0)
+        );
+
+        Notification.Builder builder;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            builder = new Notification.Builder(this, FileServer.CHANNEL_FILE);
+        } else {
+            builder = new Notification.Builder(this);
+        }
+
+        builder.setContentTitle("📁 File Received from PC")
+                .setContentText(file.getName() + " (" + (file.length() / 1024) + " KB)")
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setAutoCancel(true)
+                .setContentIntent(pi);
+
+        nm.notify((int) (FileServer.NOTIF_BASE_ID + (System.currentTimeMillis() % 1000)), builder.build());
+    }
+
     @Override
     public void onDestroy() {
         isRunning = false;
+        if (fileServer != null) {
+            fileServer.stop();
+        }
         if (workerThread != null) workerThread.interrupt();
         if (wakeLock != null && wakeLock.isHeld()) {
             wakeLock.release();

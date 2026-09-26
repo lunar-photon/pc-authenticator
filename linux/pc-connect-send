@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+import os
+import sys
+import json
+import urllib.request
+import urllib.error
+from urllib.parse import quote
+import subprocess
+import time
+
+DAEMON_URL = "http://127.0.0.1:1760"
+
+def notify(title, msg, icon="smartphone", urgency="normal"):
+    try:
+        subprocess.Popen(['notify-send', '-i', icon, '-a', 'PC Connect', '-u', urgency, title, msg], stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+def get_phone_status():
+    try:
+        req = urllib.request.Request(f"{DAEMON_URL}/api/phone/status", timeout=2)
+        with urllib.request.urlopen(req) as resp:
+            return json.loads(resp.read().decode('utf-8'))
+    except Exception:
+        return None
+
+def send_file_direct(filepath, phone_ip, phone_port=1761):
+    fn = os.path.basename(filepath)
+    size = os.path.getsize(filepath)
+    url = f"http://{phone_ip}:{phone_port}/api/files/upload?path={quote('/storage/emulated/0/Download')}"
+    
+    with open(filepath, 'rb') as f:
+        data = f.read()
+
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={
+            'Content-Type': 'application/octet-stream',
+            'Content-Length': str(size),
+            'X-Filename': quote(fn)
+        },
+        method='POST'
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return resp.status == 200
+
+def stage_file_fallback(filepath):
+    req_data = json.dumps({"filepath": os.path.abspath(filepath)}).encode('utf-8')
+    req = urllib.request.Request(
+        f"{DAEMON_URL}/api/files/stage",
+        data=req_data,
+        headers={'Content-Type': 'application/json'},
+        method='POST'
+    )
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        return json.loads(resp.read().decode('utf-8'))
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: pc-connect-send <file1> [file2] ...")
+        sys.exit(1)
+
+    files = [os.path.abspath(f) for f in sys.argv[1:] if os.path.exists(f)]
+    if not files:
+        notify("PC Connect", "No valid files selected for transfer", icon="dialog-warning")
+        sys.exit(1)
+
+    st = get_phone_status()
+    if not st:
+        notify("PC Connect Error", "PC Authenticator daemon is not running.", icon="dialog-error", urgency="critical")
+        sys.exit(1)
+
+    phone = st.get('phone', {})
+    phone_ip = phone.get('ip')
+    phone_port = phone.get('port', 1761)
+    phone_name = phone.get('client_name', 'Android Phone')
+
+    total = len(files)
+    success_count = 0
+
+    for idx, f in enumerate(files, 1):
+        fn = os.path.basename(f)
+        notify("PC Connect", f"Transferring {fn} to {phone_name} ({idx}/{total})...", icon="network-transmit")
+        sent = False
+        
+        # 1. Try direct upload to phone file server
+        if phone_ip:
+            try:
+                sent = send_file_direct(f, phone_ip, phone_port)
+            except Exception as e:
+                sent = False
+
+        # 2. If direct fails or phone IP unknown, fallback to staging + NDJSON push
+        if not sent:
+            try:
+                res = stage_file_fallback(f)
+                if res.get('status') == 'ok':
+                    sent = True
+            except Exception as e:
+                sent = False
+
+        if sent:
+            success_count += 1
+
+    if success_count == total:
+        if total == 1:
+            notify("✅ File Sent", f"Successfully sent {os.path.basename(files[0])} to {phone_name}", icon="document-save")
+        else:
+            notify("✅ Files Sent", f"Successfully sent {total} files to {phone_name}", icon="document-save")
+    else:
+        notify("⚠️ Transfer Incomplete", f"Sent {success_count}/{total} files to {phone_name}", icon="dialog-warning")
+
+if __name__ == '__main__':
+    main()

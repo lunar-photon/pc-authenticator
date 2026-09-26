@@ -37,6 +37,18 @@ import android.widget.Toast;
 
 import org.json.JSONObject;
 
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.ContentResolver;
+import android.database.Cursor;
+import android.provider.OpenableColumns;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.util.List;
 
 public class MainActivity extends Activity {
@@ -45,6 +57,23 @@ public class MainActivity extends Activity {
     private TextView tvStatusDot;
     private TextView tvStatusText;
     private Button btnTestConnection;
+
+    // KDE Connect Feature UI references
+    private static final int REQUEST_PICK_FILE = 4001;
+    private Button btnSendFileToPc;
+    private Button btnSendClipToPc;
+    private Button btnGetClipFromPc;
+    private Button btnRingPc;
+    private Button btnLockPc;
+
+    private TextView tvMediaStatus;
+    private TextView tvMediaTitle;
+    private TextView tvMediaArtist;
+    private Button btnMediaPrev;
+    private Button btnMediaPlayPause;
+    private Button btnMediaNext;
+    private Button btnMediaVolDown;
+    private Button btnMediaVolUp;
 
     private LinearLayout layoutChallenge;
     private TextView tvChallengeMessage;
@@ -127,6 +156,24 @@ public class MainActivity extends Activity {
         btnAddManual = findViewById(R.id.btn_add_manual);
         tvScanStatus = findViewById(R.id.tv_scan_status);
         containerDevices = findViewById(R.id.container_devices);
+
+        // Bind KDE Connect UI
+        btnSendFileToPc = findViewById(R.id.btn_send_file_to_pc);
+        btnSendClipToPc = findViewById(R.id.btn_send_clip_to_pc);
+        btnGetClipFromPc = findViewById(R.id.btn_get_clip_from_pc);
+        btnRingPc = findViewById(R.id.btn_ring_pc);
+        btnLockPc = findViewById(R.id.btn_lock_pc);
+
+        tvMediaStatus = findViewById(R.id.tv_media_status);
+        tvMediaTitle = findViewById(R.id.tv_media_title);
+        tvMediaArtist = findViewById(R.id.tv_media_artist);
+        btnMediaPrev = findViewById(R.id.btn_media_prev);
+        btnMediaPlayPause = findViewById(R.id.btn_media_play_pause);
+        btnMediaNext = findViewById(R.id.btn_media_next);
+        btnMediaVolDown = findViewById(R.id.btn_media_voldown);
+        btnMediaVolUp = findViewById(R.id.btn_media_volup);
+
+        setupKdeConnectListeners();
 
         // Header Settings Button
         btnSettings = findViewById(R.id.btn_settings);
@@ -976,18 +1023,310 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) {}
     }
 
+    private void setupKdeConnectListeners() {
+        if (btnSendFileToPc != null) btnSendFileToPc.setOnClickListener(v -> pickFileToSend());
+        if (btnSendClipToPc != null) btnSendClipToPc.setOnClickListener(v -> sendPhoneClipboardToPc());
+        if (btnGetClipFromPc != null) btnGetClipFromPc.setOnClickListener(v -> fetchPcClipboard());
+        if (btnRingPc != null) btnRingPc.setOnClickListener(v -> ringPc());
+        if (btnLockPc != null) btnLockPc.setOnClickListener(v -> lockPc());
+
+        if (btnMediaPlayPause != null) btnMediaPlayPause.setOnClickListener(v -> sendMediaCommand("PlayPause"));
+        if (btnMediaPrev != null) btnMediaPrev.setOnClickListener(v -> sendMediaCommand("Previous"));
+        if (btnMediaNext != null) btnMediaNext.setOnClickListener(v -> sendMediaCommand("Next"));
+        if (btnMediaVolDown != null) btnMediaVolDown.setOnClickListener(v -> sendMediaCommand("VolumeDown"));
+        if (btnMediaVolUp != null) btnMediaVolUp.setOnClickListener(v -> sendMediaCommand("VolumeUp"));
+    }
+
+    private void pickFileToSend() {
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.setType("*/*");
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        try {
+            startActivityForResult(Intent.createChooser(intent, "Select File to Send to PC"), REQUEST_PICK_FILE);
+        } catch (Exception e) {
+            Toast.makeText(this, "No file manager found", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_PICK_FILE && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            uploadFileUri(data.getData());
+        }
+    }
+
+    private void uploadFileUri(Uri uri) {
+        String filename = getFileName(uri);
+        Toast.makeText(this, "⏳ Uploading " + filename + " to PC...", Toast.LENGTH_SHORT).show();
+
+        new Thread(() -> {
+            try {
+                PairedDevice active = DeviceManager.getActiveDevice(this);
+                String uploadUrl = active.getBaseUrl() + "/api/files/upload";
+                HttpURLConnection conn = (HttpURLConnection) new URL(uploadUrl).openConnection();
+                conn.setRequestMethod("POST");
+                conn.setDoOutput(true);
+                conn.setConnectTimeout(10000);
+                conn.setReadTimeout(60000);
+                conn.setRequestProperty("Content-Type", "application/octet-stream");
+                conn.setRequestProperty("X-Filename", URLEncoder.encode(filename, "UTF-8"));
+                if (active.isPaired()) {
+                    conn.setRequestProperty("Authorization", "Bearer " + active.authToken);
+                }
+
+                try (InputStream is = getContentResolver().openInputStream(uri);
+                     OutputStream os = conn.getOutputStream()) {
+                    byte[] buf = new byte[65536];
+                    int r;
+                    while ((r = is.read(buf)) != -1) {
+                        os.write(buf, 0, r);
+                    }
+                }
+
+                int code = conn.getResponseCode();
+                runOnUiThread(() -> {
+                    if (code == 200) {
+                        Toast.makeText(MainActivity.this, "✅ Sent " + filename + " to PC Downloads!", Toast.LENGTH_LONG).show();
+                    } else {
+                        Toast.makeText(MainActivity.this, "❌ Upload failed (HTTP " + code + ")", Toast.LENGTH_SHORT).show();
+                    }
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "❌ Error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+            }
+        }).start();
+    }
+
+    private String getFileName(Uri uri) {
+        String result = null;
+        if (ContentResolver.SCHEME_CONTENT.equals(uri.getScheme())) {
+            try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
+                if (cursor != null && cursor.moveToFirst()) {
+                    int idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                    if (idx >= 0) {
+                        result = cursor.getString(idx);
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+        if (result == null) {
+            result = uri.getLastPathSegment();
+        }
+        return (result != null) ? result : ("file_" + System.currentTimeMillis());
+    }
+
+    private void sendPhoneClipboardToPc() {
+        try {
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm == null || !cm.hasPrimaryClip() || cm.getPrimaryClip().getItemCount() == 0) {
+                Toast.makeText(this, "Phone clipboard is empty", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            CharSequence text = cm.getPrimaryClip().getItemAt(0).getText();
+            if (text == null || text.length() == 0) {
+                Toast.makeText(this, "Phone clipboard is empty", Toast.LENGTH_SHORT).show();
+                return;
+            }
+
+            Toast.makeText(this, "📋 Sending clipboard to PC...", Toast.LENGTH_SHORT).show();
+            new Thread(() -> {
+                try {
+                    PairedDevice active = DeviceManager.getActiveDevice(this);
+                    String url = active.getBaseUrl() + "/api/clipboard";
+                    HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                    conn.setRequestMethod("POST");
+                    conn.setRequestProperty("Content-Type", "application/json");
+                    if (active.isPaired()) {
+                        conn.setRequestProperty("Authorization", "Bearer " + active.authToken);
+                    }
+                    conn.setDoOutput(true);
+                    JSONObject body = new JSONObject().put("text", text.toString());
+                    try (OutputStream os = conn.getOutputStream()) {
+                        os.write(body.toString().getBytes("UTF-8"));
+                    }
+                    int code = conn.getResponseCode();
+                    runOnUiThread(() -> {
+                        if (code == 200) {
+                            Toast.makeText(MainActivity.this, "✅ Copied to PC Clipboard!", Toast.LENGTH_SHORT).show();
+                        } else {
+                            Toast.makeText(MainActivity.this, "❌ Failed to copy to PC", Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                } catch (Exception e) {
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "❌ Error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+                }
+            }).start();
+        } catch (Exception e) {
+            Toast.makeText(this, "Error accessing clipboard: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void fetchPcClipboard() {
+        Toast.makeText(this, "📋 Fetching PC clipboard...", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            try {
+                PairedDevice active = DeviceManager.getActiveDevice(this);
+                String url = active.getBaseUrl() + "/api/clipboard";
+                HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                conn.setRequestMethod("GET");
+                if (active.isPaired()) {
+                    conn.setRequestProperty("Authorization", "Bearer " + active.authToken);
+                }
+                int code = conn.getResponseCode();
+                if (code == 200) {
+                    StringBuilder sb = new StringBuilder();
+                    try (BufferedReader r = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"))) {
+                        String line;
+                        while ((line = r.readLine()) != null) sb.append(line);
+                    }
+                    JSONObject res = new JSONObject(sb.toString());
+                    String text = res.optString("text", "");
+                    runOnUiThread(() -> {
+                        if (!text.isEmpty()) {
+                            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                            if (cm != null) {
+                                cm.setPrimaryClip(ClipData.newPlainText("PC Clipboard", text));
+                                Toast.makeText(MainActivity.this, "✅ Copied from PC: " + (text.length() > 30 ? text.substring(0, 30) + "..." : text), Toast.LENGTH_LONG).show();
+                            }
+                        } else {
+                            Toast.makeText(MainActivity.this, "PC clipboard is currently empty", Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                }
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "❌ Error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+            }
+        }).start();
+    }
+
+    private void ringPc() {
+        new Thread(() -> {
+            try {
+                PairedDevice active = DeviceManager.getActiveDevice(this);
+                String url = active.getBaseUrl() + "/api/ping";
+                HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                conn.setRequestMethod("POST");
+                conn.setDoOutput(true);
+                if (active.isPaired()) {
+                    conn.setRequestProperty("Authorization", "Bearer " + active.authToken);
+                }
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write("{}".getBytes("UTF-8"));
+                }
+                conn.getResponseCode();
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "🔔 Laptop is ringing!", Toast.LENGTH_SHORT).show());
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "❌ Error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+            }
+        }).start();
+    }
+
+    private void lockPc() {
+        new Thread(() -> {
+            try {
+                PairedDevice active = DeviceManager.getActiveDevice(this);
+                String url = active.getBaseUrl() + "/api/action";
+                HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setDoOutput(true);
+                if (active.isPaired()) {
+                    conn.setRequestProperty("Authorization", "Bearer " + active.authToken);
+                }
+                JSONObject body = new JSONObject().put("action", "lock");
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write(body.toString().getBytes("UTF-8"));
+                }
+                conn.getResponseCode();
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "🔒 Laptop screen locked!", Toast.LENGTH_SHORT).show());
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "❌ Error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+            }
+        }).start();
+    }
+
+    private void sendMediaCommand(String command) {
+        new Thread(() -> {
+            try {
+                PairedDevice active = DeviceManager.getActiveDevice(this);
+                String url = active.getBaseUrl() + "/api/media/command";
+                HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setDoOutput(true);
+                if (active.isPaired()) {
+                    conn.setRequestProperty("Authorization", "Bearer " + active.authToken);
+                }
+                JSONObject body = new JSONObject().put("command", command);
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write(body.toString().getBytes("UTF-8"));
+                }
+                conn.getResponseCode();
+                runOnUiThread(() -> pollHandler.postDelayed(this::fetchMediaStatus, 300));
+            } catch (Exception ignored) {}
+        }).start();
+    }
+
+    private void fetchMediaStatus() {
+        new Thread(() -> {
+            try {
+                PairedDevice active = DeviceManager.getActiveDevice(this);
+                String url = active.getBaseUrl() + "/api/media/status";
+                HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(2000);
+                conn.setReadTimeout(2000);
+                if (active.isPaired()) {
+                    conn.setRequestProperty("Authorization", "Bearer " + active.authToken);
+                }
+                int code = conn.getResponseCode();
+                if (code == 200) {
+                    StringBuilder sb = new StringBuilder();
+                    try (BufferedReader r = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"))) {
+                        String line;
+                        while ((line = r.readLine()) != null) sb.append(line);
+                    }
+                    JSONObject res = new JSONObject(sb.toString());
+                    boolean hasPlayer = res.optBoolean("has_player", false);
+                    String status = res.optString("status", "");
+                    String title = res.optString("title", "");
+                    String artist = res.optString("artist", "");
+                    String player = res.optString("player", "");
+
+                    runOnUiThread(() -> {
+                        if (hasPlayer && (!title.isEmpty() || !artist.isEmpty())) {
+                            if (tvMediaStatus != null) tvMediaStatus.setText(status + " (" + player + ")");
+                            if (tvMediaTitle != null) tvMediaTitle.setText(title.isEmpty() ? "Playing" : title);
+                            if (tvMediaArtist != null) tvMediaArtist.setText(artist);
+                            if (btnMediaPlayPause != null) {
+                                btnMediaPlayPause.setText("Playing".equalsIgnoreCase(status) ? "⏸" : "▶");
+                            }
+                        } else {
+                            if (tvMediaStatus != null) tvMediaStatus.setText("Idle");
+                            if (tvMediaTitle != null) tvMediaTitle.setText("No media active on PC");
+                            if (tvMediaArtist != null) tvMediaArtist.setText("");
+                        }
+                    });
+                }
+            } catch (Exception ignored) {}
+        }).start();
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
         refreshDeviceList();
         updateChallengeUIFromStore();
         checkActiveChallenge();
+        fetchMediaStatus();
 
         // Start periodic check every 2.5 seconds while activity is in foreground
         pollRunnable = new Runnable() {
             @Override
             public void run() {
                 checkActiveChallenge();
+                fetchMediaStatus();
                 pollHandler.postDelayed(this, 2500);
             }
         };

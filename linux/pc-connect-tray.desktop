@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=PC Connect
+Comment=KDE Connect Replacement & Biometric Authenticator
+Exec=/home/lunarphoton/.local/bin/pc-connect-tray.py
+Icon=smartphone
+Terminal=false
+Categories=Utility;Network;
+X-KDE-autostart-after=panel

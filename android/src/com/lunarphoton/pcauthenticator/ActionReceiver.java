@@ -16,7 +16,10 @@ public class ActionReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
         String action = intent.getAction();
-        if (action == null) return;
+        if (RingManager.ACTION_STOP_ALARM.equals(action)) {
+            RingManager.stopAlarm(context);
+            return;
+        }
 
         SharedPreferences prefs = context.getSharedPreferences("pc_auth_prefs", Context.MODE_PRIVATE);
         PairedDevice active = DeviceManager.getActiveDevice(context);

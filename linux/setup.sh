@@ -74,10 +74,32 @@ EOF
             echo -e "${YELLOW}[!] User service enabled. (Will start on next login if not active in current session).${NC}"
         fi
         
-        # Also install global command symlink ~/.local/bin/pc-auth
+        # Also install global command symlinks ~/.local/bin/pc-auth, pc-connect, pc-connect-send, pc-connect-tray
         mkdir -p "$TARGET_HOME/.local/bin"
         ln -sf "$SCRIPT_DIR/setup.sh" "$TARGET_HOME/.local/bin/pc-auth"
-        chown -h "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.local/bin/pc-auth"
+        ln -sf "$SCRIPT_DIR/pc-connect" "$TARGET_HOME/.local/bin/pc-connect"
+        ln -sf "$SCRIPT_DIR/pc-connect-send" "$TARGET_HOME/.local/bin/pc-connect-send"
+        ln -sf "$SCRIPT_DIR/pc-connect-tray.py" "$TARGET_HOME/.local/bin/pc-connect-tray"
+        chown -h "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.local/bin/pc-auth" "$TARGET_HOME/.local/bin/pc-connect" "$TARGET_HOME/.local/bin/pc-connect-send" "$TARGET_HOME/.local/bin/pc-connect-tray" 2>/dev/null || true
+
+        # Install Dolphin Context Menu
+        mkdir -p "$TARGET_HOME/.local/share/kio/servicemenus"
+        if [ -f "$SCRIPT_DIR/pc_connect.desktop" ]; then
+            cp -f "$SCRIPT_DIR/pc_connect.desktop" "$TARGET_HOME/.local/share/kio/servicemenus/pc_connect.desktop"
+            chown "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.local/share/kio/servicemenus/pc_connect.desktop" 2>/dev/null || true
+        fi
+
+        # Install Autostart and Desktop Application Launcher
+        mkdir -p "$TARGET_HOME/.config/autostart" "$TARGET_HOME/.local/share/applications"
+        if [ -f "$SCRIPT_DIR/pc-connect-tray.desktop" ]; then
+            cp -f "$SCRIPT_DIR/pc-connect-tray.desktop" "$TARGET_HOME/.config/autostart/pc-connect-tray.desktop"
+            chown "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.config/autostart/pc-connect-tray.desktop" 2>/dev/null || true
+        fi
+        if [ -f "$SCRIPT_DIR/pc-connect.desktop" ]; then
+            cp -f "$SCRIPT_DIR/pc-connect.desktop" "$TARGET_HOME/.local/share/applications/pc-connect.desktop"
+            chown "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.local/share/applications/pc-connect.desktop" 2>/dev/null || true
+            sudo -u "$TARGET_USER" update-desktop-database "$TARGET_HOME/.local/share/applications" 2>/dev/null || true
+        fi
     fi
 }
 

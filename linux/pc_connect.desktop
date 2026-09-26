@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=KonqPopupMenu/Plugin
+MimeType=all/allfiles;inode/directory;
+Actions=sendToPhone;browsePhone;
+X-KDE-Priority=TopLevel
+X-KDE-Submenu=PC Connect
+
+[Desktop Action sendToPhone]
+Name=Send to Phone (PC Connect)
+Icon=smartphone
+Exec=pc-connect-send %F
+
+[Desktop Action browsePhone]
+Name=Browse Phone Storage...
+Icon=folder-remote
+Exec=pc-connect browse

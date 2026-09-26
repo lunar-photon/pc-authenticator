@@ -12,13 +12,19 @@ import secrets
 import hmac
 import hashlib
 import random
-from urllib.parse import urlparse, parse_qs
+import shutil
+import mimetypes
+from urllib.parse import urlparse, parse_qs, unquote, quote
+import urllib.request
+import urllib.error
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(BASE_DIR, 'config.json')
 STATIC_DIR = os.path.join(BASE_DIR, 'static')
 APK_FILE = os.path.join(STATIC_DIR, 'authenticator.apk')
+STAGING_DIR = os.path.join(BASE_DIR, 'staging')
+os.makedirs(STAGING_DIR, exist_ok=True)
 
 DEFAULT_CONFIG = {
     "web_port": 1760,
@@ -27,6 +33,18 @@ DEFAULT_CONFIG = {
     "allowed_usb_serials": [],
     "paired_clients": {}
 }
+
+active_phone_state = {
+    "ip": None,
+    "port": 1761,
+    "client_name": "Android Phone",
+    "battery_level": None,
+    "is_charging": False,
+    "last_seen": 0,
+    "auth_token": None
+}
+
+staged_files = {}  # token -> {"filepath": ..., "filename": ..., "size": ..., "created_at": ...}
 
 def load_config():
     if os.path.exists(CONFIG_FILE):
@@ -71,11 +89,26 @@ def get_auth_token_from_request(handler):
     return None
 
 def authenticate_client(handler, cfg):
+    client_ip = handler.client_address[0]
+    # Local requests (e.g. from desktop tray or pc-connect CLI) are always authorized
+    if client_ip in ('127.0.0.1', '::1', 'localhost'):
+        return {"client_name": "Local PC", "secret_key": "", "local": True}, "local"
+
     paired = cfg.get('paired_clients', {})
     token = get_auth_token_from_request(handler)
     if not token or token not in paired:
         return None, token
-    return paired[token], token
+
+    client_info = paired[token]
+    client_info['ip'] = client_ip
+    client_info['last_seen'] = time.time()
+
+    active_phone_state['ip'] = client_ip
+    active_phone_state['client_name'] = client_info.get('client_name', 'Android Phone')
+    active_phone_state['last_seen'] = time.time()
+    active_phone_state['auth_token'] = token
+
+    return client_info, token
 
 def get_local_ip():
     try:
@@ -94,6 +127,176 @@ def get_local_ip():
         return ip
     except Exception:
         return '127.0.0.1'
+
+# ==========================================
+# KDE Plasma 6 & MPRIS Helpers
+# ==========================================
+
+def get_mpris_players():
+    try:
+        out = subprocess.check_output(['qdbus6'], stderr=subprocess.DEVNULL).decode('utf-8')
+        return [l.strip() for l in out.splitlines() if l.strip().startswith('org.mpris.MediaPlayer2.')]
+    except Exception:
+        return []
+
+def get_mpris_status():
+    players = get_mpris_players()
+    if not players:
+        return {"has_player": False}
+    chosen = players[0]
+    chosen_status = "Stopped"
+    for p in players:
+        try:
+            st = subprocess.check_output(['qdbus6', p, '/org/mpris/MediaPlayer2', 'org.mpris.MediaPlayer2.Player.PlaybackStatus'], stderr=subprocess.DEVNULL).decode().strip()
+            if st == "Playing":
+                chosen = p
+                chosen_status = st
+                break
+            elif st == "Paused":
+                chosen = p
+                chosen_status = st
+        except Exception:
+            pass
+
+    title, artist, album, art_url = "", "", "", ""
+    try:
+        lines = subprocess.check_output(['qdbus6', chosen, '/org/mpris/MediaPlayer2', 'org.mpris.MediaPlayer2.Player.Metadata'], stderr=subprocess.DEVNULL).decode().splitlines()
+        for line in lines:
+            if line.startswith('xesam:title:'):
+                title = line[len('xesam:title:'):].strip()
+            elif line.startswith('xesam:artist:'):
+                artist = line[len('xesam:artist:'):].strip()
+            elif line.startswith('xesam:album:'):
+                album = line[len('xesam:album:'):].strip()
+            elif line.startswith('mpris:artUrl:'):
+                art_url = line[len('mpris:artUrl:'):].strip()
+    except Exception:
+        pass
+
+    return {
+        "has_player": True,
+        "player": chosen.replace('org.mpris.MediaPlayer2.', ''),
+        "status": chosen_status,
+        "title": title or "Unknown Title",
+        "artist": artist or "Unknown Artist",
+        "album": album,
+        "art_url": art_url
+    }
+
+def send_mpris_command(command):
+    players = get_mpris_players()
+    if not players:
+        return False
+    target = players[0]
+    for p in players:
+        try:
+            st = subprocess.check_output(['qdbus6', p, '/org/mpris/MediaPlayer2', 'org.mpris.MediaPlayer2.Player.PlaybackStatus'], stderr=subprocess.DEVNULL).decode().strip()
+            if st == "Playing":
+                target = p
+                break
+        except Exception:
+            pass
+
+    if command in ("PlayPause", "Play", "Pause", "Next", "Previous", "Stop"):
+        subprocess.run(['qdbus6', target, '/org/mpris/MediaPlayer2', f'org.mpris.MediaPlayer2.Player.{command}'], stderr=subprocess.DEVNULL)
+        return True
+    elif command == "VolumeUp":
+        try:
+            curr = float(subprocess.check_output(['qdbus6', target, '/org/mpris/MediaPlayer2', 'org.mpris.MediaPlayer2.Player.Volume'], stderr=subprocess.DEVNULL).decode().strip())
+            new_vol = min(1.0, curr + 0.05)
+            subprocess.run(['qdbus6', target, '/org/mpris/MediaPlayer2', 'org.mpris.MediaPlayer2.Player.Volume', str(new_vol)], stderr=subprocess.DEVNULL)
+            return True
+        except Exception:
+            pass
+    elif command == "VolumeDown":
+        try:
+            curr = float(subprocess.check_output(['qdbus6', target, '/org/mpris/MediaPlayer2', 'org.mpris.MediaPlayer2.Player.Volume'], stderr=subprocess.DEVNULL).decode().strip())
+            new_vol = max(0.0, curr - 0.05)
+            subprocess.run(['qdbus6', target, '/org/mpris/MediaPlayer2', 'org.mpris.MediaPlayer2.Player.Volume', str(new_vol)], stderr=subprocess.DEVNULL)
+            return True
+        except Exception:
+            pass
+    return False
+
+def get_kde_clipboard():
+    try:
+        return subprocess.check_output(['qdbus6', 'org.kde.klipper', '/klipper', 'org.kde.klipper.klipper.getClipboardContents'], stderr=subprocess.DEVNULL).decode('utf-8')
+    except Exception:
+        return ""
+
+def set_kde_clipboard(text):
+    try:
+        subprocess.run(['qdbus6', 'org.kde.klipper', '/klipper', 'org.kde.klipper.klipper.setClipboardContents', text], stderr=subprocess.DEVNULL)
+        try:
+            subprocess.Popen(['notify-send', '-i', 'edit-paste', '-a', 'PC Connect', 'Clipboard Synced', 'Received clipboard from phone'], stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+        return True
+    except Exception:
+        return False
+
+def ping_pc():
+    def _play_and_notify():
+        try:
+            for s in ['/usr/share/sounds/freedesktop/stereo/phone-incoming-call.oga', '/usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga']:
+                if os.path.exists(s):
+                    subprocess.run(['paplay', s], stderr=subprocess.DEVNULL)
+                    break
+        except Exception:
+            pass
+    threading.Thread(target=_play_and_notify, daemon=True).start()
+    try:
+        subprocess.Popen(['notify-send', '-i', 'phone', '-u', 'critical', '-a', 'PC Connect', '🔔 Phone Calling', 'Your paired phone is pinging your PC!'], stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+def ring_phone(phone_ip=None, port=1761):
+    # 1. Broadcast via NDJSON stream
+    auth_mgr.broadcast_ndjson(json.dumps({"event": "ring", "title": "Find My Phone", "time": int(time.time())}) + "\n")
+    # 2. Direct HTTP to phone if IP is known
+    target_ip = phone_ip or active_phone_state.get('ip')
+    if target_ip:
+        def _direct_ring():
+            try:
+                req = urllib.request.Request(f"http://{target_ip}:{port}/api/ring", data=b'{}', headers={'Content-Type': 'application/json'}, method='POST')
+                urllib.request.urlopen(req, timeout=2)
+            except Exception:
+                pass
+        threading.Thread(target=_direct_ring, daemon=True).start()
+
+def notify_file_received(filename, filepath):
+    try:
+        for sound in ['/usr/share/sounds/freedesktop/stereo/complete.oga', '/usr/share/sounds/freedesktop/stereo/message.oga']:
+            if os.path.exists(sound):
+                subprocess.Popen(['paplay', sound], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                break
+    except Exception:
+        pass
+
+    downloads_dir = os.path.expanduser('~/Downloads')
+    cmd = [
+        'notify-send',
+        '-i', 'document-save',
+        '-a', 'PC Connect',
+        '📁 File Received from Phone',
+        f'{filename}\nSaved in ~/Downloads',
+        '-A', 'open=Open File',
+        '-A', 'folder=Open Downloads'
+    ]
+    try:
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True)
+        out, _ = p.communicate(timeout=45)
+        chosen = out.strip()
+        if chosen == 'open':
+            subprocess.Popen(['xdg-open', filepath])
+        elif chosen == 'folder':
+            subprocess.Popen(['xdg-open', downloads_dir])
+    except Exception:
+        pass
+
+# ==========================================
+# Auth Manager
+# ==========================================
 
 class AuthManager:
     def __init__(self):
@@ -199,13 +402,9 @@ class AuthManager:
                 "status": "pending"
             }
         
-        # 1. Broadcast to Web PWA
         self.broadcast_sse("auth_request", self.current_session)
-
-        # 2. Broadcast to Android App (ntfy-android protocol)
         app_notification = self.build_app_notification(self.current_session, topic="login")
         self.broadcast_ndjson(json.dumps(app_notification) + "\n")
-
         return self.current_session
 
     def approve(self, session_id):
@@ -266,6 +465,10 @@ class AuthManager:
 
 auth_mgr = AuthManager()
 
+# ==========================================
+# HTTP Request Handler
+# ==========================================
+
 class AuthenticatorHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         sys.stderr.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {self.client_address[0]} {format % args}\n")
@@ -286,31 +489,34 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
         path = parsed.path
         qs = parse_qs(parsed.query)
 
-        # 1. ntfy Server Health Check
+        # 1. Health & Config
         if path in ('/v1/health', '/health'):
             self.send_json({"healthy": True, "schema": 1})
             return
-
-        # 2. ntfy Server Config / Base URL check
-        if path in ('/config', '/v1/config'):
+        elif path in ('/config', '/v1/config'):
             cfg = load_config()
             self.send_json({"base_url": f"http://{get_local_ip()}:{cfg.get('web_port', 1760)}", "app_root": "/"})
             return
-
-        # 3. Topic Authorization Check (ntfy Android AddDialog queries /<topic>/auth)
-        if path.endswith('/auth'):
+        elif path.endswith('/auth'):
             topic_name = path.strip('/').split('/')[0] if '/' in path.strip('/') else "login"
             self.send_json({"topic": topic_name, "read": True, "write": True})
             return
 
-        # 4. APK Download
-        if path in ('/apk', '/authenticator.apk', '/download'):
+        # 2. APK Download
+        elif path in ('/apk', '/authenticator.apk', '/download'):
             self.serve_apk()
             return
 
-        # 5. Static Files for Web Interface
-        if path in ('/', '/index.html'):
+        # 3. Static Files
+        elif path in ('/', '/index.html'):
             self.serve_file(os.path.join(STATIC_DIR, 'index.html'), 'text/html; charset=utf-8')
+            return
+        elif path == '/browse':
+            browse_file = os.path.join(STATIC_DIR, 'browse.html')
+            if os.path.exists(browse_file):
+                self.serve_file(browse_file, 'text/html; charset=utf-8')
+            else:
+                self.send_error(404, "Browse File Not Found")
             return
         elif path == '/manifest.json':
             self.serve_file(os.path.join(STATIC_DIR, 'manifest.json'), 'application/manifest+json')
@@ -318,15 +524,13 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
         elif path == '/sw.js':
             self.serve_file(os.path.join(STATIC_DIR, 'sw.js'), 'application/javascript')
             return
-        elif path == '/icon-192.png':
-            self.serve_file(os.path.join(STATIC_DIR, 'icon-192.png'), 'image/png')
-            return
-        elif path == '/icon-512.png':
-            self.serve_file(os.path.join(STATIC_DIR, 'icon-512.png'), 'image/png')
+        elif path in ('/icon-192.png', '/icon-512.png'):
+            fn = path.strip('/')
+            self.serve_file(os.path.join(STATIC_DIR, fn), 'image/png')
             return
 
-        # 6. PC Authenticator API endpoints
-        if path == '/api/info':
+        # 4. Core APIs
+        elif path == '/api/info':
             cfg = load_config()
             self.send_json({
                 "hostname": socket.gethostname(),
@@ -354,7 +558,6 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             if not client_info:
                 self.send_json({"error": "unauthorized", "message": "Pairing required"}, status=401)
                 return
-
             with auth_mgr.lock:
                 if auth_mgr.current_session and auth_mgr.current_session["status"] == "pending":
                     now = time.time()
@@ -368,11 +571,105 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             self.send_json({"has_challenge": False})
             return
 
-        # 7. Topic Streaming / Polling (ntfy-android protocol)
-        # Check if this is a topic polling request (?poll=1)
+        # 5. KDE Connect APIs
+        elif path == '/api/phone/status':
+            cfg = load_config()
+            is_connected = (time.time() - active_phone_state["last_seen"] < 90) or bool(auth_mgr.ndjson_clients)
+            # Fallback to config for phone IP if not seen recently
+            if not active_phone_state['ip']:
+                for client in cfg.get('paired_clients', {}).values():
+                    if client.get('ip') and client.get('ip') != '127.0.0.1':
+                        active_phone_state['ip'] = client['ip']
+                        active_phone_state['client_name'] = client.get('client_name', 'Android Phone')
+                        break
+            self.send_json({
+                "connected": is_connected,
+                "phone": active_phone_state,
+                "clients_count": len(cfg.get('paired_clients', {}))
+            })
+            return
+
+        elif path == '/api/clipboard':
+            self.send_json({"status": "ok", "text": get_kde_clipboard()})
+            return
+
+        elif path == '/api/media/status':
+            self.send_json(get_mpris_status())
+            return
+
+        # 6. File Staging Download (PC to Phone pull)
+        elif path.startswith('/api/files/staging/'):
+            token = path.replace('/api/files/staging/', '').strip('/')
+            staged = staged_files.get(token)
+            if not staged or not os.path.exists(staged['filepath']):
+                self.send_error(404, "Staged file not found or expired")
+                return
+            try:
+                size = os.path.getsize(staged['filepath'])
+                fn = quote(staged['filename'])
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/octet-stream')
+                self.send_header('Content-Length', str(size))
+                self.send_header('Content-Disposition', f'attachment; filename="{fn}"')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                with open(staged['filepath'], 'rb') as f:
+                    while chunk := f.read(65536):
+                        self.wfile.write(chunk)
+            except Exception as e:
+                try: self.send_error(500, str(e))
+                except Exception: pass
+            return
+
+        # 7. Phone File Browser Proxies (Linux Desktop -> Phone)
+        elif path == '/api/phone/files/list':
+            phone_ip = active_phone_state.get('ip')
+            if not phone_ip:
+                self.send_json({"error": "phone_not_connected", "message": "Phone is not connected or IP unknown"}, status=503)
+                return
+            req_path = qs.get('path', ['/storage/emulated/0'])[0]
+            phone_port = active_phone_state.get('port', 1761)
+            try:
+                target_url = f"http://{phone_ip}:{phone_port}/api/files/list?path={quote(req_path)}"
+                req = urllib.request.Request(target_url, timeout=6)
+                with urllib.request.urlopen(req) as resp:
+                    data = resp.read()
+                    self.send_response(resp.status)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(data)
+            except Exception as e:
+                self.send_json({"error": "phone_unreachable", "message": str(e)}, status=502)
+            return
+
+        elif path == '/api/phone/files/download':
+            phone_ip = active_phone_state.get('ip')
+            if not phone_ip:
+                self.send_error(503, "Phone is not connected")
+                return
+            req_path = qs.get('path', [''])[0]
+            phone_port = active_phone_state.get('port', 1761)
+            try:
+                target_url = f"http://{phone_ip}:{phone_port}/api/files/download?path={quote(req_path)}"
+                req = urllib.request.Request(target_url, timeout=30)
+                with urllib.request.urlopen(req) as resp:
+                    self.send_response(200)
+                    for h, v in resp.headers.items():
+                        if h.lower() in ('content-type', 'content-length', 'content-disposition'):
+                            self.send_header(h, v)
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    while chunk := resp.read(65536):
+                        self.wfile.write(chunk)
+            except Exception as e:
+                try: self.send_error(502, f"Download error: {e}")
+                except Exception: pass
+            return
+
+        # 8. Topic Streaming / Polling (ntfy Android protocol)
         is_poll = qs.get('poll', ['0'])[0] in ('1', 'true')
         parts = [p for p in path.strip('/').split('/') if p]
-        
         if parts:
             topic = parts[0]
             if is_poll:
@@ -387,8 +684,82 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        qs = parse_qs(parsed.query)
+
+        # 1. File Upload (Phone -> PC)
+        if path == '/api/files/upload':
+            raw_fn = self.headers.get('X-Filename', '')
+            if raw_fn:
+                filename = os.path.basename(unquote(raw_fn))
+            else:
+                filename = f"received_file_{int(time.time())}"
+
+            downloads_dir = os.path.expanduser('~/Downloads')
+            os.makedirs(downloads_dir, exist_ok=True)
+
+            target_path = os.path.join(downloads_dir, filename)
+            base, ext = os.path.splitext(filename)
+            counter = 1
+            while os.path.exists(target_path):
+                target_path = os.path.join(downloads_dir, f"{base} ({counter}){ext}")
+                counter += 1
+
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+                remaining = length
+                with open(target_path, 'wb') as f:
+                    while remaining > 0:
+                        chunk_size = min(65536, remaining)
+                        chunk = self.rfile.read(chunk_size)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        remaining -= len(chunk)
+
+                final_fn = os.path.basename(target_path)
+                threading.Thread(target=notify_file_received, args=(final_fn, target_path), daemon=True).start()
+                self.send_json({"status": "ok", "filename": final_fn, "path": target_path})
+            except Exception as e:
+                self.send_json({"error": "upload_failed", "message": str(e)}, status=500)
+            return
+
+        # 2. File Proxy Upload (PC -> Phone)
+        elif path == '/api/phone/files/upload':
+            phone_ip = active_phone_state.get('ip')
+            if not phone_ip:
+                self.send_json({"error": "phone_not_connected"}, status=503)
+                return
+            phone_port = active_phone_state.get('port', 1761)
+            target_path = qs.get('path', ['/storage/emulated/0/Download'])[0]
+            raw_fn = self.headers.get('X-Filename', '')
+            target_url = f"http://{phone_ip}:{phone_port}/api/files/upload?path={quote(target_path)}"
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+                data = self.rfile.read(length)
+                req = urllib.request.Request(
+                    target_url,
+                    data=data,
+                    headers={
+                        'Content-Type': 'application/octet-stream',
+                        'X-Filename': raw_fn
+                    },
+                    method='POST'
+                )
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    res_body = resp.read()
+                    self.send_response(resp.status)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(res_body)
+            except Exception as e:
+                self.send_json({"error": "upload_proxy_failed", "message": str(e)}, status=502)
+            return
+
+        # Read JSON body for standard API calls
         body = self.read_json()
 
+        # 3. Core PC Authenticator APIs
         if path == '/api/request_auth':
             user = body.get('user', os.environ.get('USER', 'lunarphoton'))
             cfg = load_config()
@@ -464,6 +835,9 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
                     "ip": self.client_address[0]
                 }
                 save_config(cfg)
+                active_phone_state['ip'] = self.client_address[0]
+                active_phone_state['client_name'] = client_name
+                active_phone_state['auth_token'] = auth_token
                 try:
                     subprocess.Popen(['notify-send', 'PC Authenticator', f'✅ Successfully paired with {client_name}!', '-u', 'normal'])
                 except Exception:
@@ -481,116 +855,206 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
         elif path in ('/api/approve_current', '/api/approve'):
             cfg = load_config()
             client_info, token = authenticate_client(self, cfg)
-
             if not client_info:
-                sys.stderr.write(f"SECURITY ALERT: Unauthorized approve attempt from {self.client_address[0]}\n")
-                sys.stderr.flush()
-                self.send_json({"status": "unauthorized", "message": "Device not paired. Pairing required."}, status=401)
+                self.send_json({"status": "unauthorized", "message": "Device not paired"}, status=401)
                 return
 
-            sig = self.headers.get('X-Auth-Signature', '')
-            ts_str = self.headers.get('X-Auth-Timestamp', '')
-            try:
-                ts = int(ts_str)
-                now = int(time.time())
-                if abs(now - ts) > 45:
-                    self.send_json({"status": "forbidden", "message": "Timestamp expired (clock skew)"}, status=403)
+            if not client_info.get('local'):
+                sig = self.headers.get('X-Auth-Signature', '')
+                ts_str = self.headers.get('X-Auth-Timestamp', '')
+                try:
+                    ts = int(ts_str)
+                    if abs(int(time.time()) - ts) > 45:
+                        self.send_json({"status": "forbidden", "message": "Timestamp expired"}, status=403)
+                        return
+                except Exception:
+                    self.send_json({"status": "forbidden", "message": "Invalid timestamp"}, status=403)
                     return
-            except Exception:
-                self.send_json({"status": "forbidden", "message": "Invalid or missing timestamp header"}, status=403)
-                return
 
-            with auth_mgr.lock:
-                current_sid = auth_mgr.current_session.get("session_id", "") if auth_mgr.current_session else ""
+                with auth_mgr.lock:
+                    current_sid = auth_mgr.current_session.get("session_id", "") if auth_mgr.current_session else ""
+                secret_key = client_info.get('secret_key', '')
+                req_sid = self.headers.get('X-Session-ID', '')
+                if not req_sid and isinstance(body, dict):
+                    req_sid = body.get('session_id', '')
 
-            if not current_sid:
-                self.send_json({"status": "no_active_session"}, status=404)
-                return
-
-            secret_key = client_info.get('secret_key', '')
-            req_sid = self.headers.get('X-Session-ID', '')
-            if not req_sid and isinstance(body, dict):
-                req_sid = body.get('session_id', '')
-
-            candidates = [f"{current_sid}:{ts}:approve", f":{ts}:approve"]
-            if req_sid:
-                candidates.append(f"{req_sid}:{ts}:approve")
-
-            valid = False
-            for cand in candidates:
-                expected_sig = hmac.new(secret_key.encode('utf-8'), cand.encode('utf-8'), hashlib.sha256).hexdigest()
-                if hmac.compare_digest(sig.lower(), expected_sig.lower()):
-                    valid = True
-                    break
-
-            if not valid:
-                sys.stderr.write(f"SECURITY ALERT: Signature mismatch from {self.client_address[0]} for {client_info.get('client_name')}\n")
-                sys.stderr.flush()
-                self.send_json({"status": "forbidden", "message": "Cryptographic signature mismatch"}, status=403)
-                return
+                candidates = [f"{current_sid}:{ts}:approve", f":{ts}:approve"]
+                if req_sid:
+                    candidates.append(f"{req_sid}:{ts}:approve")
+                valid = False
+                for cand in candidates:
+                    expected_sig = hmac.new(secret_key.encode('utf-8'), cand.encode('utf-8'), hashlib.sha256).hexdigest()
+                    if hmac.compare_digest(sig.lower(), expected_sig.lower()):
+                        valid = True
+                        break
+                if not valid:
+                    self.send_json({"status": "forbidden", "message": "Cryptographic signature mismatch"}, status=403)
+                    return
 
             if path == '/api/approve_current':
                 ok = auth_mgr.approve_current()
             else:
-                session_id = body.get('session_id') if isinstance(body, dict) else current_sid
+                session_id = body.get('session_id') if isinstance(body, dict) else ""
                 ok = auth_mgr.approve(session_id)
             self.send_json({"status": "ok" if ok else "error"})
 
         elif path in ('/api/deny_current', '/api/deny'):
             cfg = load_config()
             client_info, token = authenticate_client(self, cfg)
-
             if not client_info:
-                sys.stderr.write(f"SECURITY ALERT: Unauthorized deny attempt from {self.client_address[0]}\n")
-                sys.stderr.flush()
                 self.send_json({"status": "unauthorized", "message": "Device not paired"}, status=401)
                 return
 
-            sig = self.headers.get('X-Auth-Signature', '')
-            ts_str = self.headers.get('X-Auth-Timestamp', '')
-            try:
-                ts = int(ts_str)
-                now = int(time.time())
-                if abs(now - ts) > 45:
-                    self.send_json({"status": "forbidden", "message": "Timestamp expired"}, status=403)
+            if not client_info.get('local'):
+                sig = self.headers.get('X-Auth-Signature', '')
+                ts_str = self.headers.get('X-Auth-Timestamp', '')
+                try:
+                    ts = int(ts_str)
+                    if abs(int(time.time()) - ts) > 45:
+                        self.send_json({"status": "forbidden", "message": "Timestamp expired"}, status=403)
+                        return
+                except Exception:
+                    self.send_json({"status": "forbidden", "message": "Invalid timestamp"}, status=403)
                     return
-            except Exception:
-                self.send_json({"status": "forbidden", "message": "Invalid timestamp"}, status=403)
-                return
 
-            with auth_mgr.lock:
-                current_sid = auth_mgr.current_session.get("session_id", "") if auth_mgr.current_session else ""
-
-            if not current_sid:
-                self.send_json({"status": "no_active_session"}, status=404)
-                return
-
-            secret_key = client_info.get('secret_key', '')
-            req_sid = self.headers.get('X-Session-ID', '')
-            if not req_sid and isinstance(body, dict):
-                req_sid = body.get('session_id', '')
-
-            candidates = [f"{current_sid}:{ts}:deny", f":{ts}:deny"]
-            if req_sid:
-                candidates.append(f"{req_sid}:{ts}:deny")
-
-            valid = False
-            for cand in candidates:
-                expected_sig = hmac.new(secret_key.encode('utf-8'), cand.encode('utf-8'), hashlib.sha256).hexdigest()
-                if hmac.compare_digest(sig.lower(), expected_sig.lower()):
-                    valid = True
-                    break
-
-            if not valid:
-                self.send_json({"status": "forbidden", "message": "Cryptographic signature mismatch"}, status=403)
-                return
+                with auth_mgr.lock:
+                    current_sid = auth_mgr.current_session.get("session_id", "") if auth_mgr.current_session else ""
+                secret_key = client_info.get('secret_key', '')
+                req_sid = self.headers.get('X-Session-ID', '')
+                if not req_sid and isinstance(body, dict):
+                    req_sid = body.get('session_id', '')
+                candidates = [f"{current_sid}:{ts}:deny", f":{ts}:deny"]
+                if req_sid:
+                    candidates.append(f"{req_sid}:{ts}:deny")
+                valid = False
+                for cand in candidates:
+                    expected_sig = hmac.new(secret_key.encode('utf-8'), cand.encode('utf-8'), hashlib.sha256).hexdigest()
+                    if hmac.compare_digest(sig.lower(), expected_sig.lower()):
+                        valid = True
+                        break
+                if not valid:
+                    self.send_json({"status": "forbidden", "message": "Cryptographic signature mismatch"}, status=403)
+                    return
 
             if path == '/api/deny_current':
                 ok = auth_mgr.deny_current()
             else:
-                session_id = body.get('session_id') if isinstance(body, dict) else current_sid
+                session_id = body.get('session_id') if isinstance(body, dict) else ""
                 ok = auth_mgr.deny(session_id)
             self.send_json({"status": "ok" if ok else "error"})
+
+        # 4. KDE Connect Phone Status Updates
+        elif path == '/api/phone/status':
+            if 'battery' in body:
+                active_phone_state['battery_level'] = body.get('battery')
+            if 'charging' in body:
+                active_phone_state['is_charging'] = bool(body.get('charging'))
+            if 'port' in body:
+                active_phone_state['port'] = int(body.get('port'))
+            active_phone_state['ip'] = self.client_address[0]
+            active_phone_state['last_seen'] = time.time()
+            self.send_json({"status": "ok"})
+
+        # 5. Clipboard Sync
+        elif path == '/api/clipboard':
+            text = body.get('text', '')
+            if text:
+                set_kde_clipboard(text)
+                # If triggered from local PC, broadcast to phone
+                if self.client_address[0] in ('127.0.0.1', '::1', 'localhost'):
+                    auth_mgr.broadcast_ndjson(json.dumps({"event": "clipboard", "text": text}) + "\n")
+            self.send_json({"status": "ok"})
+
+        # 6. Media Control
+        elif path == '/api/media/command':
+            cmd = body.get('command', '')
+            success = send_mpris_command(cmd)
+            self.send_json({"status": "ok" if success else "failed"})
+
+        # 7. Ping (Ring PC)
+        elif path == '/api/ping':
+            ping_pc()
+            self.send_json({"status": "ok"})
+
+        # 8. Ring (Find My Phone)
+        elif path == '/api/ring':
+            phone_ip = body.get('phone_ip') or active_phone_state.get('ip')
+            ring_phone(phone_ip=phone_ip)
+            self.send_json({"status": "ok"})
+
+        # 9. Remote Action (Lock, Suspend, Screen off)
+        elif path == '/api/action':
+            act = body.get('action', '')
+            if act == 'lock':
+                subprocess.Popen(['loginctl', 'lock-session'])
+                self.send_json({"status": "ok", "action": "lock"})
+            elif act == 'suspend':
+                subprocess.Popen(['systemctl', 'suspend'])
+                self.send_json({"status": "ok", "action": "suspend"})
+            elif act == 'screen_off':
+                subprocess.Popen(['kscreen-doctor', '--dpms', 'off'])
+                self.send_json({"status": "ok", "action": "screen_off"})
+            else:
+                self.send_json({"status": "unknown_action"}, status=400)
+
+        # 10. File Staging for PC-to-Phone send
+        elif path == '/api/files/stage':
+            filepath = body.get('filepath', '')
+            if not filepath or not os.path.exists(filepath):
+                self.send_json({"error": "file_not_found"}, status=404)
+                return
+            token = secrets.token_urlsafe(16)
+            fn = os.path.basename(filepath)
+            size = os.path.getsize(filepath)
+            staged_files[token] = {
+                "filepath": filepath,
+                "filename": fn,
+                "size": size,
+                "created_at": time.time()
+            }
+            local_ip = get_local_ip()
+            cfg = load_config()
+            port = cfg.get('web_port', 1760)
+            dl_url = f"http://{local_ip}:{port}/api/files/staging/{token}"
+            auth_mgr.broadcast_ndjson(json.dumps({
+                "event": "incoming_file",
+                "filename": fn,
+                "download_url": dl_url,
+                "size": size
+            }) + "\n")
+            self.send_json({"status": "ok", "token": token, "download_url": dl_url})
+
+        # 11. Phone Filesystem Mutations (Proxy)
+        elif path == '/api/phone/files/delete':
+            phone_ip = active_phone_state.get('ip')
+            if not phone_ip:
+                self.send_json({"error": "phone_not_connected"}, status=503)
+                return
+            phone_port = active_phone_state.get('port', 1761)
+            target_path = body.get('path', '')
+            try:
+                target_url = f"http://{phone_ip}:{phone_port}/api/files/delete?path={quote(target_path)}"
+                req = urllib.request.Request(target_url, data=b'{}', headers={'Content-Type': 'application/json'}, method='POST')
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    self.send_json({"status": "ok"})
+            except Exception as e:
+                self.send_json({"error": "delete_failed", "message": str(e)}, status=502)
+
+        elif path == '/api/phone/files/mkdir':
+            phone_ip = active_phone_state.get('ip')
+            if not phone_ip:
+                self.send_json({"error": "phone_not_connected"}, status=503)
+                return
+            phone_port = active_phone_state.get('port', 1761)
+            parent_path = body.get('path', '')
+            name = body.get('name', '')
+            try:
+                target_url = f"http://{phone_ip}:{phone_port}/api/files/mkdir?path={quote(parent_path)}&name={quote(name)}"
+                req = urllib.request.Request(target_url, data=b'{}', headers={'Content-Type': 'application/json'}, method='POST')
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    self.send_json({"status": "ok"})
+            except Exception as e:
+                self.send_json({"error": "mkdir_failed", "message": str(e)}, status=502)
 
         else:
             self.send_error(404, "Not Found")
@@ -657,7 +1121,7 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             auth_mgr.remove_ndjson_client(q)
             return
 
-        # 2. If a challenge is already pending, push it immediately
+        # 2. Push active challenge if pending
         with auth_mgr.lock:
             if auth_mgr.current_session and auth_mgr.current_session["status"] == "pending":
                 if time.time() <= auth_mgr.current_session["expires_at"]:
@@ -752,10 +1216,8 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass
         except Exception as e:
-            try:
-                self.send_error(500, str(e))
-            except Exception:
-                pass
+            try: self.send_error(500, str(e))
+            except Exception: pass
 
     def serve_file(self, filepath, content_type):
         if not os.path.exists(filepath):
@@ -773,10 +1235,8 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass
         except Exception as e:
-            try:
-                self.send_error(500, str(e))
-            except Exception:
-                pass
+            try: self.send_error(500, str(e))
+            except Exception: pass
 
     def read_json(self):
         try:
@@ -798,6 +1258,10 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             self.wfile.write(content)
         except (BrokenPipeError, ConnectionResetError):
             pass
+
+# ==========================================
+# Network Discovery & Beaconing
+# ==========================================
 
 def get_default_gateway():
     try:
@@ -862,7 +1326,6 @@ def start_udp_beacon(port):
                 except Exception:
                     pass
 
-                # Announce directly to the hotspot gateway (the phone)
                 if gw and gw != '127.0.0.1':
                     try:
                         sock.sendto(beacon_data, (gw, port))
@@ -907,8 +1370,9 @@ def main():
 
     server = ThreadingHTTPServer(('0.0.0.0', port), AuthenticatorHandler)
     sys.stderr.write("==================================================\n")
-    sys.stderr.write(f"  PC Authenticator Daemon Running on port {port}\n")
+    sys.stderr.write(f"  PC Connect & Authenticator Daemon Running (Port {port})\n")
     sys.stderr.write(f"  Device ID: {get_laptop_id()}\n")
+    sys.stderr.write(f"  Web Explorer: http://{local_ip}:{port}/browse\n")
     sys.stderr.write(f"  Download APK: http://{local_ip}:{port}/apk\n")
     sys.stderr.write(f"  Topic Stream: http://{local_ip}:{port}/login/json\n")
     sys.stderr.write("==================================================\n")
@@ -922,7 +1386,6 @@ def main():
 
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] in ('--pair', 'pair'):
-        import urllib.request
         cli_pair()
     else:
         main()
