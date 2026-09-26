@@ -36,6 +36,8 @@ import android.os.BatteryManager;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.media.MediaScannerConnection;
+import android.content.ContentValues;
+import android.provider.MediaStore;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
@@ -592,16 +594,43 @@ public class AuthService extends Service {
                 HttpURLConnection conn = (HttpURLConnection) new URL(downloadUrl).openConnection();
                 conn.setConnectTimeout(10000);
                 conn.setReadTimeout(60000);
-                try (InputStream in = conn.getInputStream();
-                     FileOutputStream fos = new FileOutputStream(dest)) {
-                    byte[] buf = new byte[65536];
-                    int r;
-                    while ((r = in.read(buf)) != -1) {
-                        fos.write(buf, 0, r);
+
+                OutputStream fos = null;
+                try {
+                    fos = new FileOutputStream(dest);
+                } catch (Exception directEx) {
+                    Log.w(TAG, "Direct FileOutputStream failed, trying MediaStore: " + directEx.getMessage());
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        try {
+                            ContentValues values = new ContentValues();
+                            values.put(MediaStore.MediaColumns.DISPLAY_NAME, dest.getName());
+                            values.put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream");
+                            values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
+                            Uri insertedUri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                            if (insertedUri != null) {
+                                fos = getContentResolver().openOutputStream(insertedUri);
+                            }
+                        } catch (Exception mediaEx) {
+                            Log.e(TAG, "MediaStore insert error", mediaEx);
+                        }
                     }
                 }
-                MediaScannerConnection.scanFile(this, new String[]{dest.getAbsolutePath()}, null, null);
-                showFileNotification(dest);
+
+                if (fos != null) {
+                    try (InputStream in = conn.getInputStream();
+                         OutputStream outStream = fos) {
+                        byte[] buf = new byte[65536];
+                        int r;
+                        while ((r = in.read(buf)) != -1) {
+                            outStream.write(buf, 0, r);
+                        }
+                        outStream.flush();
+                    }
+                    try {
+                        MediaScannerConnection.scanFile(this, new String[]{dest.getAbsolutePath()}, null, null);
+                    } catch (Exception ignored) {}
+                    showFileNotification(dest);
+                }
             } catch (Exception e) {
                 Log.e(TAG, "Error downloading incoming file", e);
             }

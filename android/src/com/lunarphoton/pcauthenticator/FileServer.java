@@ -15,6 +15,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 import android.content.ContentUris;
+import android.content.ContentValues;
 import android.database.Cursor;
 import android.provider.MediaStore;
 import java.util.HashSet;
@@ -385,12 +386,16 @@ public class FileServer {
     private void handleFileUpload(String targetDir, Map<String, String> headers, InputStream in, OutputStream out) throws Exception {
         String destDirPath = (targetDir != null && !targetDir.isEmpty()) ? targetDir : Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).getAbsolutePath();
         File destDir = new File(destDirPath);
-        if (!destDir.exists()) destDir.mkdirs();
+        try {
+            if (!destDir.exists()) destDir.mkdirs();
+        } catch (Exception ignored) {}
 
         String rawFn = headers.get("x-filename");
         String filename = "received_file_" + System.currentTimeMillis();
         if (rawFn != null && !rawFn.isEmpty()) {
-            filename = new File(URLDecoder.decode(rawFn, "UTF-8")).getName();
+            try {
+                filename = new File(URLDecoder.decode(rawFn, "UTF-8")).getName();
+            } catch (Exception ignored) {}
         }
 
         File destFile = new File(destDir, filename);
@@ -412,7 +417,36 @@ public class FileServer {
             contentLength = Long.parseLong(headers.get("content-length"));
         } catch (Exception ignored) {}
 
-        try (FileOutputStream fos = new FileOutputStream(destFile)) {
+        OutputStream fos = null;
+
+        // 1. Try direct FileOutputStream (works when MANAGE_EXTERNAL_STORAGE is granted or Android < 10)
+        try {
+            fos = new FileOutputStream(destFile);
+        } catch (Exception directEx) {
+            Log.w(TAG, "Direct FileOutputStream failed, trying MediaStore: " + directEx.getMessage());
+            // 2. Fallback to MediaStore.Downloads (standard scoped storage API, no permission required)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                try {
+                    ContentValues values = new ContentValues();
+                    values.put(MediaStore.MediaColumns.DISPLAY_NAME, destFile.getName());
+                    values.put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream");
+                    values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
+                    Uri insertedUri = context.getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                    if (insertedUri != null) {
+                        fos = context.getContentResolver().openOutputStream(insertedUri);
+                    }
+                } catch (Exception mediaEx) {
+                    Log.e(TAG, "MediaStore insert error", mediaEx);
+                }
+            }
+        }
+
+        if (fos == null) {
+            sendError(out, 403, "Permission Denied: Please enable 'All files access' in phone app settings.");
+            return;
+        }
+
+        try {
             byte[] buf = new byte[65536];
             long remaining = contentLength > 0 ? contentLength : Long.MAX_VALUE;
             while (remaining > 0) {
@@ -422,11 +456,16 @@ public class FileServer {
                 fos.write(buf, 0, r);
                 if (contentLength > 0) remaining -= r;
             }
+            fos.flush();
+        } finally {
+            try { fos.close(); } catch (Exception ignored) {}
         }
 
         // Notify MediaStore so Gallery / Files apps see it immediately
         final File finalFile = destFile;
-        MediaScannerConnection.scanFile(context, new String[]{destFile.getAbsolutePath()}, null, null);
+        try {
+            MediaScannerConnection.scanFile(context, new String[]{destFile.getAbsolutePath()}, null, null);
+        } catch (Exception ignored) {}
 
         // Show system notification
         showFileReceivedNotification(finalFile);

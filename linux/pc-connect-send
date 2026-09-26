@@ -18,32 +18,68 @@ def notify(title, msg, icon="smartphone", urgency="normal"):
 
 def get_phone_status():
     try:
-        req = urllib.request.Request(f"{DAEMON_URL}/api/phone/status", timeout=2)
-        with urllib.request.urlopen(req) as resp:
+        req = urllib.request.Request(f"{DAEMON_URL}/api/phone/status")
+        with urllib.request.urlopen(req, timeout=3) as resp:
             return json.loads(resp.read().decode('utf-8'))
     except Exception:
         return None
 
-def send_file_direct(filepath, phone_ip, phone_port=1761):
+def send_file(filepath, phone_ip, phone_port=1761):
     fn = os.path.basename(filepath)
     size = os.path.getsize(filepath)
-    url = f"http://{phone_ip}:{phone_port}/api/files/upload?path={quote('/storage/emulated/0/Download')}"
-    
-    with open(filepath, 'rb') as f:
-        data = f.read()
 
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={
-            'Content-Type': 'application/octet-stream',
-            'Content-Length': str(size),
-            'X-Filename': quote(fn)
-        },
-        method='POST'
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return resp.status == 200
+    # 1. Try local daemon upload proxy (PC -> Daemon -> Phone)
+    try:
+        url = f"{DAEMON_URL}/api/phone/files/upload?path={quote('/storage/emulated/0/Download')}"
+        with open(filepath, 'rb') as f:
+            data = f.read()
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={
+                'Content-Type': 'application/octet-stream',
+                'Content-Length': str(size),
+                'X-Filename': quote(fn)
+            },
+            method='POST'
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            if resp.status == 200:
+                return True
+    except Exception:
+        pass
+
+    # 2. Try direct HTTP upload to phone file server
+    if phone_ip:
+        try:
+            url = f"http://{phone_ip}:{phone_port}/api/files/upload?path={quote('/storage/emulated/0/Download')}"
+            with open(filepath, 'rb') as f:
+                data = f.read()
+            req = urllib.request.Request(
+                url,
+                data=data,
+                headers={
+                    'Content-Type': 'application/octet-stream',
+                    'Content-Length': str(size),
+                    'X-Filename': quote(fn)
+                },
+                method='POST'
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                if resp.status == 200:
+                    return True
+        except Exception:
+            pass
+
+    # 3. Fallback to staging download URL pushed via NDJSON
+    try:
+        res = stage_file_fallback(filepath)
+        if res.get('status') == 'ok':
+            return True
+    except Exception:
+        pass
+
+    return False
 
 def stage_file_fallback(filepath):
     req_data = json.dumps({"filepath": os.path.abspath(filepath)}).encode('utf-8')
@@ -82,24 +118,7 @@ def main():
     for idx, f in enumerate(files, 1):
         fn = os.path.basename(f)
         notify("PC Connect", f"Transferring {fn} to {phone_name} ({idx}/{total})...", icon="network-transmit")
-        sent = False
-        
-        # 1. Try direct upload to phone file server
-        if phone_ip:
-            try:
-                sent = send_file_direct(f, phone_ip, phone_port)
-            except Exception as e:
-                sent = False
-
-        # 2. If direct fails or phone IP unknown, fallback to staging + NDJSON push
-        if not sent:
-            try:
-                res = stage_file_fallback(f)
-                if res.get('status') == 'ok':
-                    sent = True
-            except Exception as e:
-                sent = False
-
+        sent = send_file(f, phone_ip, phone_port)
         if sent:
             success_count += 1
 
