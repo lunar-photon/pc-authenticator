@@ -112,11 +112,16 @@ class PhoneExplorerWindow(QMainWindow):
         sidebar_layout.addWidget(self.bookmark_list)
         sidebar_layout.addStretch()
 
-        # Ring Phone button in sidebar
+        # Ring & Stop Phone button in sidebar
         btn_ring = QPushButton("🔔 Ring Phone")
         btn_ring.setStyleSheet("background-color: #3b4252; color: #eceff4; border-radius: 6px; padding: 8px;")
         btn_ring.clicked.connect(lambda: post_json("/api/ring"))
         sidebar_layout.addWidget(btn_ring)
+
+        btn_unring = QPushButton("🛑 Stop Ringing")
+        btn_unring.setStyleSheet("background-color: #4c1d24; color: #ff8080; border-radius: 6px; padding: 6px;")
+        btn_unring.clicked.connect(lambda: post_json("/api/unring"))
+        sidebar_layout.addWidget(btn_unring)
 
         main_layout.addWidget(sidebar)
 
@@ -422,6 +427,9 @@ class PCConnectTrayApp:
 
         act_ring = self.menu.addAction("🔔 Find My Phone (Ring)")
         act_ring.triggered.connect(lambda: post_json("/api/ring"))
+
+        act_unring = self.menu.addAction("🛑 Stop Ringing Phone")
+        act_unring.triggered.connect(lambda: post_json("/api/unring"))
 
         act_lock = self.menu.addAction("🔒 Lock PC Screen")
         act_lock.triggered.connect(lambda: post_json("/api/action", {"action": "lock"}))

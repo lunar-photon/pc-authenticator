@@ -71,9 +71,17 @@ def cmd_browse(args):
     else:
         subprocess.Popen(["python3", gui_script, "--browse"])
 
-def cmd_ring():
+def cmd_ring(args=None):
+    if args and args[0] in ('stop', 'off', 'cancel'):
+        cmd_unring()
+        return
     res = post_json("/api/ring")
     print("🔔 Ring command sent to phone! Check your device.")
+    print("   (Run 'pc-connect unring' to silence from PC, or tap Dismiss on phone)")
+
+def cmd_unring():
+    res = post_json("/api/unring")
+    print("🛑 Silence / unring command sent to phone.")
 
 def cmd_ping():
     res = post_json("/api/ping")
@@ -151,7 +159,9 @@ def main():
         else:
             print("pc-connect-send not found.")
     elif cmd in ("ring", "find"):
-        cmd_ring()
+        cmd_ring(args)
+    elif cmd in ("unring", "silence", "stop-ring"):
+        cmd_unring()
     elif cmd in ("ping",):
         cmd_ping()
     elif cmd in ("clip", "clipboard", "copy"):

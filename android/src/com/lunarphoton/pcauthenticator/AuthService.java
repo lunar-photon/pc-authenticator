@@ -8,6 +8,7 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.BroadcastReceiver;
 import android.net.Uri;
 import android.content.SharedPreferences;
 import android.graphics.Color;
@@ -71,6 +72,20 @@ public class AuthService extends Service {
 
         fileServer = new FileServer(this);
         fileServer.start();
+
+        IntentFilter unlockFilter = new IntentFilter();
+        unlockFilter.addAction(Intent.ACTION_USER_PRESENT);
+        registerReceiver(new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (Intent.ACTION_USER_PRESENT.equals(intent.getAction())) {
+                    if (RingManager.isRinging()) {
+                        Log.i(TAG, "Device unlocked by user - stopping Find My Phone alarm");
+                        RingManager.stopAlarm(context);
+                    }
+                }
+            }
+        }, unlockFilter);
 
         startUdpBeaconListener();
     }
@@ -182,6 +197,8 @@ public class AuthService extends Service {
                                     sendBroadcast(updateIntent);
                                 } else if ("ring".equals(event)) {
                                     RingManager.startAlarm(AuthService.this);
+                                } else if ("unring".equals(event) || "stop_alarm".equals(event)) {
+                                    RingManager.stopAlarm(AuthService.this);
                                 } else if ("clipboard".equals(event)) {
                                     handleClipboardEvent(json);
                                 } else if ("incoming_file".equals(event)) {

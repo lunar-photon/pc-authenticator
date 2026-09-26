@@ -252,19 +252,51 @@ def ping_pc():
     except Exception:
         pass
 
+def get_phone_target():
+    ip = active_phone_state.get('ip')
+    port = active_phone_state.get('port', 1761)
+    if not ip or ip in ('127.0.0.1', 'localhost', '::1'):
+        cfg = load_config()
+        for token, client in cfg.get('paired_clients', {}).items():
+            client_ip = client.get('ip')
+            if client_ip and client_ip not in ('127.0.0.1', 'localhost', '::1'):
+                ip = client_ip
+                active_phone_state['ip'] = ip
+                active_phone_state['client_name'] = client.get('client_name', 'Android Phone')
+                break
+    return ip, port
+
 def ring_phone(phone_ip=None, port=1761):
     # 1. Broadcast via NDJSON stream
     auth_mgr.broadcast_ndjson(json.dumps({"event": "ring", "title": "Find My Phone", "time": int(time.time())}) + "\n")
     # 2. Direct HTTP to phone if IP is known
-    target_ip = phone_ip or active_phone_state.get('ip')
+    target_ip, target_port = get_phone_target()
+    target_ip = phone_ip or target_ip
+    target_port = port or target_port
     if target_ip:
         def _direct_ring():
             try:
-                req = urllib.request.Request(f"http://{target_ip}:{port}/api/ring", data=b'{}', headers={'Content-Type': 'application/json'}, method='POST')
-                urllib.request.urlopen(req, timeout=2)
+                req = urllib.request.Request(f"http://{target_ip}:{target_port}/api/ring", data=b'{}', headers={'Content-Type': 'application/json'}, method='POST')
+                urllib.request.urlopen(req, timeout=3)
             except Exception:
                 pass
         threading.Thread(target=_direct_ring, daemon=True).start()
+
+def unring_phone(phone_ip=None, port=1761):
+    # 1. Broadcast unring via NDJSON stream
+    auth_mgr.broadcast_ndjson(json.dumps({"event": "unring", "title": "Stop Alarm", "time": int(time.time())}) + "\n")
+    # 2. Direct HTTP to phone to silence
+    target_ip, target_port = get_phone_target()
+    target_ip = phone_ip or target_ip
+    target_port = port or target_port
+    if target_ip:
+        def _direct_unring():
+            try:
+                req = urllib.request.Request(f"http://{target_ip}:{target_port}/api/unring", data=b'{}', headers={'Content-Type': 'application/json'}, method='POST')
+                urllib.request.urlopen(req, timeout=3)
+            except Exception:
+                pass
+        threading.Thread(target=_direct_unring, daemon=True).start()
 
 def notify_file_received(filename, filepath):
     try:
@@ -770,16 +802,15 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
 
         # 7. Phone File Browser Proxies (Linux Desktop -> Phone)
         elif path == '/api/phone/files/list':
-            phone_ip = active_phone_state.get('ip')
+            phone_ip, phone_port = get_phone_target()
             if not phone_ip:
                 self.send_json({"error": "phone_not_connected", "message": "Phone is not connected or IP unknown"}, status=503)
                 return
             req_path = qs.get('path', ['/storage/emulated/0'])[0]
-            phone_port = active_phone_state.get('port', 1761)
             try:
                 target_url = f"http://{phone_ip}:{phone_port}/api/files/list?path={quote(req_path)}"
-                req = urllib.request.Request(target_url, timeout=6)
-                with urllib.request.urlopen(req) as resp:
+                req = urllib.request.Request(target_url)
+                with urllib.request.urlopen(req, timeout=8) as resp:
                     data = resp.read()
                     self.send_response(resp.status)
                     self.send_header('Content-Type', 'application/json')
@@ -791,16 +822,15 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             return
 
         elif path == '/api/phone/files/download':
-            phone_ip = active_phone_state.get('ip')
+            phone_ip, phone_port = get_phone_target()
             if not phone_ip:
                 self.send_error(503, "Phone is not connected")
                 return
             req_path = qs.get('path', [''])[0]
-            phone_port = active_phone_state.get('port', 1761)
             try:
                 target_url = f"http://{phone_ip}:{phone_port}/api/files/download?path={quote(req_path)}"
-                req = urllib.request.Request(target_url, timeout=30)
-                with urllib.request.urlopen(req) as resp:
+                req = urllib.request.Request(target_url)
+                with urllib.request.urlopen(req, timeout=30) as resp:
                     self.send_response(200)
                     for h, v in resp.headers.items():
                         if h.lower() in ('content-type', 'content-length', 'content-disposition'):
@@ -872,11 +902,10 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
 
         # 2. File Proxy Upload (PC -> Phone)
         elif path == '/api/phone/files/upload':
-            phone_ip = active_phone_state.get('ip')
+            phone_ip, phone_port = get_phone_target()
             if not phone_ip:
                 self.send_json({"error": "phone_not_connected"}, status=503)
                 return
-            phone_port = active_phone_state.get('port', 1761)
             target_path = qs.get('path', ['/storage/emulated/0/Download'])[0]
             raw_fn = self.headers.get('X-Filename', '')
             target_url = f"http://{phone_ip}:{phone_port}/api/files/upload?path={quote(target_path)}"
@@ -1129,6 +1158,12 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             ring_phone(phone_ip=phone_ip)
             self.send_json({"status": "ok"})
 
+        # 8b. Stop Ringing (Find My Phone)
+        elif path == '/api/unring':
+            phone_ip = body.get('phone_ip') or active_phone_state.get('ip')
+            unring_phone(phone_ip=phone_ip)
+            self.send_json({"status": "ok"})
+
         # 9. Remote Action (Lock, Suspend, Screen off)
         elif path == '/api/action':
             act = body.get('action', '')
@@ -1173,11 +1208,10 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
 
         # 11. Phone Filesystem Mutations (Proxy)
         elif path == '/api/phone/files/delete':
-            phone_ip = active_phone_state.get('ip')
+            phone_ip, phone_port = get_phone_target()
             if not phone_ip:
                 self.send_json({"error": "phone_not_connected"}, status=503)
                 return
-            phone_port = active_phone_state.get('port', 1761)
             target_path = body.get('path', '')
             try:
                 target_url = f"http://{phone_ip}:{phone_port}/api/files/delete?path={quote(target_path)}"
@@ -1188,11 +1222,10 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": "delete_failed", "message": str(e)}, status=502)
 
         elif path == '/api/phone/files/mkdir':
-            phone_ip = active_phone_state.get('ip')
+            phone_ip, phone_port = get_phone_target()
             if not phone_ip:
                 self.send_json({"error": "phone_not_connected"}, status=503)
                 return
-            phone_port = active_phone_state.get('port', 1761)
             parent_path = body.get('path', '')
             name = body.get('name', '')
             try:

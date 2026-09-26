@@ -11,6 +11,8 @@ import android.media.MediaPlayer;
 import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.util.Log;
@@ -20,10 +22,13 @@ public class RingManager {
     public static final String ACTION_STOP_ALARM = "com.lunarphoton.pcauthenticator.STOP_ALARM";
     public static final String CHANNEL_RING = "pc_connect_ring";
     public static final int NOTIFICATION_ID_RING = 2001;
+    public static final long ALARM_TIMEOUT_MS = 60000L; // Auto-stop after 60 seconds
 
     private static MediaPlayer mediaPlayer = null;
     private static Vibrator vibrator = null;
     private static boolean isRinging = false;
+    private static final Handler timeoutHandler = new Handler(Looper.getMainLooper());
+    private static Runnable timeoutRunnable = null;
 
     public static synchronized void startAlarm(Context context) {
         if (isRinging) return;
@@ -67,6 +72,22 @@ public class RingManager {
             }
 
             showRingNotification(context);
+
+            try {
+                Intent ringIntent = new Intent(context, RingActivity.class);
+                ringIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                context.startActivity(ringIntent);
+            } catch (Exception ignored) {}
+
+            if (timeoutRunnable != null) {
+                timeoutHandler.removeCallbacks(timeoutRunnable);
+            }
+            timeoutRunnable = () -> {
+                Log.i(TAG, "Alarm timed out after 60 seconds");
+                stopAlarm(context);
+            };
+            timeoutHandler.postDelayed(timeoutRunnable, ALARM_TIMEOUT_MS);
+
         } catch (Exception e) {
             Log.e(TAG, "Error starting alarm", e);
         }
@@ -74,6 +95,11 @@ public class RingManager {
 
     public static synchronized void stopAlarm(Context context) {
         isRinging = false;
+        if (timeoutRunnable != null) {
+            timeoutHandler.removeCallbacks(timeoutRunnable);
+            timeoutRunnable = null;
+        }
+
         if (mediaPlayer != null) {
             try {
                 if (mediaPlayer.isPlaying()) mediaPlayer.stop();
@@ -120,6 +146,13 @@ public class RingManager {
                 PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0)
         );
 
+        Intent fullScreenIntent = new Intent(context, RingActivity.class);
+        fullScreenIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        PendingIntent fullScreenPending = PendingIntent.getActivity(
+                context, 0, fullScreenIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0)
+        );
+
         android.app.Notification.Builder builder;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             builder = new android.app.Notification.Builder(context, CHANNEL_RING);
@@ -128,10 +161,11 @@ public class RingManager {
         }
 
         builder.setContentTitle("🔔 Find My Phone Ringing!")
-                .setContentText("Your PC is ringing your phone. Tap Dismiss to stop.")
+                .setContentText("Tap Dismiss or unlock phone to stop.")
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setAutoCancel(false)
                 .setOngoing(true)
+                .setFullScreenIntent(fullScreenPending, true)
                 .addAction(new android.app.Notification.Action.Builder(
                         R.mipmap.ic_launcher,
                         "🛑 DISMISS ALARM",

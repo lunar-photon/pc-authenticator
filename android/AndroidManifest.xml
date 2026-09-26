@@ -71,6 +71,15 @@
             android:exported="false"
             android:screenOrientation="portrait" />
 
+        <activity
+            android:name=".RingActivity"
+            android:label="Find My Phone"
+            android:exported="false"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:showOnLockScreen="true"
+            android:screenOrientation="portrait" />
+
         <service
             android:name=".AuthService"
             android:exported="false" />

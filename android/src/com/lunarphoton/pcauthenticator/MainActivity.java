@@ -1393,6 +1393,10 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (RingManager.isRinging()) {
+            RingManager.stopAlarm(this);
+            Toast.makeText(this, "🔔 Alarm stopped", Toast.LENGTH_SHORT).show();
+        }
         refreshDeviceList();
         updateChallengeUIFromStore();
         checkActiveChallenge();

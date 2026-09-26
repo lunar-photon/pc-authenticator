@@ -169,6 +169,9 @@ public class FileServer {
             } else if (method.equals("POST") && path.equals("/api/ring")) {
                 RingManager.startAlarm(context);
                 sendJson(rawOut, new JSONObject().put("status", "ok"));
+            } else if (method.equals("POST") && path.equals("/api/unring")) {
+                RingManager.stopAlarm(context);
+                sendJson(rawOut, new JSONObject().put("status", "ok"));
             } else if (method.equals("GET") && path.equals("/api/clipboard")) {
                 handleGetClipboard(rawOut);
             } else if (method.equals("POST") && path.equals("/api/clipboard")) {

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:background="@color/bg_dark"
+    android:padding="24dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="🔔"
+        android:textSize="72sp"
+        android:layout_marginBottom="16dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Find My Phone"
+        android:textSize="26sp"
+        android:textStyle="bold"
+        android:textColor="@color/text_white" />
+
+    <TextView
+        android:id="@+id/tv_ring_subtitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Pinging from your laptop"
+        android:textSize="14sp"
+        android:textColor="@color/accent_cyan"
+        android:layout_marginTop="6dp"
+        android:layout_marginBottom="48dp" />
+
+    <Button
+        android:id="@+id/btn_dismiss_ring"
+        android:layout_width="match_parent"
+        android:layout_height="64dp"
+        android:text="🛑 STOP ALARM"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:textColor="@color/text_white"
+        android:background="@drawable/btn_deny"
+        android:layout_marginBottom="24dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Press any Volume button or Unlock phone to dismiss"
+        android:textSize="12sp"
+        android:textColor="@color/text_muted" />
+
+</LinearLayout>
