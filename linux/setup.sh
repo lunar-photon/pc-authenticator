@@ -80,7 +80,8 @@ EOF
         ln -sf "$SCRIPT_DIR/pc-connect" "$TARGET_HOME/.local/bin/pc-connect"
         ln -sf "$SCRIPT_DIR/pc-connect-send" "$TARGET_HOME/.local/bin/pc-connect-send"
         ln -sf "$SCRIPT_DIR/pc-connect-tray.py" "$TARGET_HOME/.local/bin/pc-connect-tray"
-        chown -h "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.local/bin/pc-auth" "$TARGET_HOME/.local/bin/pc-connect" "$TARGET_HOME/.local/bin/pc-connect-send" "$TARGET_HOME/.local/bin/pc-connect-tray" 2>/dev/null || true
+        ln -sf "$SCRIPT_DIR/kdeconnect-handler" "$TARGET_HOME/.local/bin/kdeconnect-handler"
+        chown -h "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.local/bin/pc-auth" "$TARGET_HOME/.local/bin/pc-connect" "$TARGET_HOME/.local/bin/pc-connect-send" "$TARGET_HOME/.local/bin/pc-connect-tray" "$TARGET_HOME/.local/bin/kdeconnect-handler" 2>/dev/null || true
 
         # Install Dolphin Context Menu
         mkdir -p "$TARGET_HOME/.local/share/kio/servicemenus"

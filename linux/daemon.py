@@ -335,6 +335,63 @@ def ping_pc():
     except Exception:
         pass
 
+# ==========================================
+# Telephony / Call Event Management
+# ==========================================
+
+telephony_state = {
+    "call_active": False,
+    "paused_players": [],
+    "last_state": "idle"
+}
+telephony_lock = threading.Lock()
+
+def handle_telephony_call_state(state):
+    global telephony_state
+    state = (state or '').strip().lower()
+    with telephony_lock:
+        if state in ("ringing", "talking"):
+            if not telephony_state["call_active"]:
+                telephony_state["call_active"] = True
+                players = get_mpris_players()
+                playing = []
+                for p in players:
+                    try:
+                        st = subprocess.check_output(['qdbus6', p, '/org/mpris/MediaPlayer2', 'org.mpris.MediaPlayer2.Player.PlaybackStatus'], stderr=subprocess.DEVNULL).decode().strip()
+                        if st == "Playing":
+                            playing.append(p)
+                            subprocess.run(['qdbus6', p, '/org/mpris/MediaPlayer2', 'org.mpris.MediaPlayer2.Player.Pause'], stderr=subprocess.DEVNULL)
+                    except Exception:
+                        pass
+                telephony_state["paused_players"] = playing
+                if playing:
+                    try:
+                        subprocess.Popen(['notify-send', '-i', 'call-start', '-a', 'PC Connect', '📞 Incoming Call', f'Paused playback on {len(playing)} media player(s)'], stderr=subprocess.DEVNULL)
+                    except Exception:
+                        pass
+                elif state == "ringing":
+                    try:
+                        subprocess.Popen(['notify-send', '-i', 'call-start', '-a', 'PC Connect', '📞 Incoming Call', 'Phone is ringing'], stderr=subprocess.DEVNULL)
+                    except Exception:
+                        pass
+        elif state == "idle":
+            if telephony_state["call_active"]:
+                resumed = 0
+                for p in telephony_state["paused_players"]:
+                    try:
+                        subprocess.run(['qdbus6', p, '/org/mpris/MediaPlayer2', 'org.mpris.MediaPlayer2.Player.Play'], stderr=subprocess.DEVNULL)
+                        resumed += 1
+                    except Exception:
+                        pass
+                if resumed > 0:
+                    try:
+                        subprocess.Popen(['notify-send', '-i', 'audio-volume-medium', '-a', 'PC Connect', '📞 Call Ended', 'Resumed media playback'], stderr=subprocess.DEVNULL)
+                    except Exception:
+                        pass
+                telephony_state["call_active"] = False
+                telephony_state["paused_players"] = []
+        telephony_state["last_state"] = state
+
 def get_phone_target():
     ip = active_phone_state.get('ip')
     port = active_phone_state.get('port', 1761)
@@ -1273,6 +1330,12 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
                 self.send_json({"status": "ok", "action": "screen_off"})
             else:
                 self.send_json({"status": "unknown_action"}, status=400)
+
+        # 9b. Telephony / Call Event (Auto-pause media on call)
+        elif path == '/api/telephony/call':
+            state = body.get('state', '').lower()
+            handle_telephony_call_state(state)
+            self.send_json({"status": "ok", "state": state})
 
         # 10. File Staging for PC-to-Phone send
         elif path == '/api/files/stage':

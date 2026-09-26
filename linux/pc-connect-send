@@ -4,7 +4,7 @@ import sys
 import json
 import urllib.request
 import urllib.error
-from urllib.parse import quote
+from urllib.parse import quote, unquote, urlparse
 import subprocess
 import time
 
@@ -97,7 +97,15 @@ def main():
         print("Usage: pc-connect-send <file1> [file2] ...")
         sys.exit(1)
 
-    files = [os.path.abspath(f) for f in sys.argv[1:] if os.path.exists(f)]
+    files = []
+    for arg in sys.argv[1:]:
+        p = arg.strip()
+        if p.startswith('file://'):
+            p = unquote(urlparse(p).path)
+        p = os.path.realpath(os.path.expanduser(p))
+        if os.path.exists(p):
+            files.append(p)
+
     if not files:
         notify("PC Connect", "No valid files selected for transfer", icon="dialog-warning")
         sys.exit(1)

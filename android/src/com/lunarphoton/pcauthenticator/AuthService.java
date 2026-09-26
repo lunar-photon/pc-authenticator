@@ -41,6 +41,10 @@ import android.provider.MediaStore;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.telephony.TelephonyManager;
+import android.telephony.TelephonyCallback;
+import android.telephony.PhoneStateListener;
+import android.content.pm.PackageManager;
 
 public class AuthService extends Service {
     private static final String TAG = "PCAuthService";
@@ -60,6 +64,10 @@ public class AuthService extends Service {
     private Thread workerThread;
     private PowerManager.WakeLock wakeLock;
     private FileServer fileServer;
+
+    private BroadcastReceiver phoneStateReceiver = null;
+    private Object telephonyCallbackObj = null;
+    private String lastSentCallState = "idle";
 
     @Override
     public void onCreate() {
@@ -90,6 +98,7 @@ public class AuthService extends Service {
         }, unlockFilter);
 
         startUdpBeaconListener();
+        initTelephonyListener();
     }
 
     private void startUdpBeaconListener() {
@@ -143,6 +152,10 @@ public class AuthService extends Service {
                     try { currentConn.disconnect(); } catch (Exception ignored) {}
                 }).start();
             }
+        }
+
+        if (phoneStateReceiver == null) {
+            initTelephonyListener();
         }
 
         if (!isRunning) {
@@ -672,11 +685,198 @@ public class AuthService extends Service {
         nm.notify((int) (FileServer.NOTIF_BASE_ID + (System.currentTimeMillis() % 1000)), builder.build());
     }
 
+    private void initTelephonyListener() {
+        if (checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {
+            Log.w(TAG, "READ_PHONE_STATE not granted; waiting for user permission");
+        }
+
+        if (telephonyCallbackObj == null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                telephonyCallbackObj = Api31TelephonyHelper.register(this, this);
+            } else {
+                telephonyCallbackObj = LegacyTelephonyHelper.register(this, this);
+            }
+        }
+
+        try {
+            if (phoneStateReceiver == null) {
+                IntentFilter phoneFilter = new IntentFilter(TelephonyManager.ACTION_PHONE_STATE_CHANGED);
+                phoneStateReceiver = new BroadcastReceiver() {
+                    @Override
+                    public void onReceive(Context context, Intent intent) {
+                        if (TelephonyManager.ACTION_PHONE_STATE_CHANGED.equals(intent.getAction())) {
+                            String stateStr = intent.getStringExtra(TelephonyManager.EXTRA_STATE);
+                            if (stateStr != null) {
+                                handlePhoneStateString(stateStr);
+                            }
+                        }
+                    }
+                };
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    registerReceiver(phoneStateReceiver, phoneFilter, Context.RECEIVER_EXPORTED);
+                } else {
+                    registerReceiver(phoneStateReceiver, phoneFilter);
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "phoneStateReceiver registration error: " + t.getMessage());
+        }
+    }
+
+    void handlePhoneCallStateCode(int state) {
+        String mappedState = "idle";
+        if (state == TelephonyManager.CALL_STATE_RINGING) {
+            mappedState = "ringing";
+        } else if (state == TelephonyManager.CALL_STATE_OFFHOOK) {
+            mappedState = "talking";
+        } else if (state == TelephonyManager.CALL_STATE_IDLE) {
+            mappedState = "idle";
+        } else {
+            return;
+        }
+        sendTelephonyCallState(mappedState);
+    }
+
+    void handlePhoneStateString(String stateStr) {
+        String mappedState = "idle";
+        if (TelephonyManager.EXTRA_STATE_RINGING.equalsIgnoreCase(stateStr)) {
+            mappedState = "ringing";
+        } else if (TelephonyManager.EXTRA_STATE_OFFHOOK.equalsIgnoreCase(stateStr)) {
+            mappedState = "talking";
+        } else if (TelephonyManager.EXTRA_STATE_IDLE.equalsIgnoreCase(stateStr)) {
+            mappedState = "idle";
+        } else {
+            return;
+        }
+        sendTelephonyCallState(mappedState);
+    }
+
+    private void sendTelephonyCallState(String state) {
+        if (state == null) return;
+        synchronized (this) {
+            if (state.equals(lastSentCallState)) {
+                return;
+            }
+            lastSentCallState = state;
+        }
+
+        Log.i(TAG, "Dispatching phone call state to PC: " + state);
+        new Thread(() -> {
+            try {
+                PairedDevice active = DeviceManager.getActiveDevice(AuthService.this);
+                if (active == null) return;
+
+                URL u = new URL(active.getBaseUrl() + "/api/telephony/call");
+                HttpURLConnection conn = (HttpURLConnection) u.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setConnectTimeout(3000);
+                conn.setReadTimeout(3000);
+                conn.setDoOutput(true);
+                conn.setRequestProperty("Content-Type", "application/json");
+                if (active.isPaired() && active.authToken != null) {
+                    conn.setRequestProperty("Authorization", "Bearer " + active.authToken);
+                }
+                JSONObject payload = new JSONObject();
+                payload.put("state", state);
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write(payload.toString().getBytes("UTF-8"));
+                }
+                int code = conn.getResponseCode();
+                Log.d(TAG, "Sent telephony state '" + state + "' to PC, response: " + code);
+                conn.disconnect();
+            } catch (Exception e) {
+                Log.w(TAG, "Failed to send telephony state to PC: " + e.getMessage());
+            }
+        }).start();
+    }
+
+    private static class Api31TelephonyHelper {
+        static Object register(Context context, AuthService service) {
+            try {
+                TelephonyManager tm = (TelephonyManager) context.getSystemService(Context.TELEPHONY_SERVICE);
+                if (tm == null) return null;
+                CallCallback cb = new CallCallback(service);
+                tm.registerTelephonyCallback(context.getMainExecutor(), cb);
+                return cb;
+            } catch (Throwable t) {
+                Log.w(TAG, "registerTelephonyCallback failed: " + t.getMessage());
+                return null;
+            }
+        }
+
+        static void unregister(Context context, Object cb) {
+            try {
+                if (cb instanceof TelephonyCallback) {
+                    TelephonyManager tm = (TelephonyManager) context.getSystemService(Context.TELEPHONY_SERVICE);
+                    if (tm != null) {
+                        tm.unregisterTelephonyCallback((TelephonyCallback) cb);
+                    }
+                }
+            } catch (Throwable ignored) {}
+        }
+
+        private static class CallCallback extends TelephonyCallback implements TelephonyCallback.CallStateListener {
+            private final AuthService service;
+            CallCallback(AuthService service) {
+                this.service = service;
+            }
+            @Override
+            public void onCallStateChanged(int state) {
+                service.handlePhoneCallStateCode(state);
+            }
+        }
+    }
+
+    private static class LegacyTelephonyHelper {
+        static Object register(Context context, AuthService service) {
+            try {
+                TelephonyManager tm = (TelephonyManager) context.getSystemService(Context.TELEPHONY_SERVICE);
+                if (tm == null) return null;
+                PhoneStateListener psl = new PhoneStateListener() {
+                    @Override
+                    public void onCallStateChanged(int state, String phoneNumber) {
+                        service.handlePhoneCallStateCode(state);
+                    }
+                };
+                tm.listen(psl, PhoneStateListener.LISTEN_CALL_STATE);
+                return psl;
+            } catch (Throwable t) {
+                Log.w(TAG, "PhoneStateListener failed: " + t.getMessage());
+                return null;
+            }
+        }
+
+        static void unregister(Context context, Object psl) {
+            try {
+                if (psl instanceof PhoneStateListener) {
+                    TelephonyManager tm = (TelephonyManager) context.getSystemService(Context.TELEPHONY_SERVICE);
+                    if (tm != null) {
+                        tm.listen((PhoneStateListener) psl, PhoneStateListener.LISTEN_NONE);
+                    }
+                }
+            } catch (Throwable ignored) {}
+        }
+    }
+
     @Override
     public void onDestroy() {
         isRunning = false;
         if (fileServer != null) {
             fileServer.stop();
+        }
+        if (phoneStateReceiver != null) {
+            try {
+                unregisterReceiver(phoneStateReceiver);
+            } catch (Exception ignored) {}
+            phoneStateReceiver = null;
+        }
+        if (telephonyCallbackObj != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                Api31TelephonyHelper.unregister(this, telephonyCallbackObj);
+            } else {
+                LegacyTelephonyHelper.unregister(this, telephonyCallbackObj);
+            }
+            telephonyCallbackObj = null;
         }
         if (workerThread != null) workerThread.interrupt();
         if (wakeLock != null && wakeLock.isHeld()) {

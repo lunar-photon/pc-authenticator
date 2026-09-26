@@ -237,6 +237,7 @@ public class MainActivity extends Activity {
         // Request battery optimization exemption for uninterrupted background connection
         checkBatteryOptimization();
         checkStoragePermissions();
+        checkPhonePermission();
 
         // Register receiver for background challenge alerts
         IntentFilter filter = new IntentFilter();
@@ -376,6 +377,22 @@ public class MainActivity extends Activity {
                         Manifest.permission.WRITE_EXTERNAL_STORAGE
                 }, 102);
             }
+        }
+    }
+
+    private void checkPhonePermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{Manifest.permission.READ_PHONE_STATE}, 103);
+            }
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == 103 && grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            reconnectService();
         }
     }
 

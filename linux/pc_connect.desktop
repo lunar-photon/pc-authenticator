@@ -10,9 +10,9 @@ X-KDE-Submenu=PC Connect
 [Desktop Action sendToPhone]
 Name=Send to Phone (PC Connect)
 Icon=smartphone
-Exec=pc-connect-send %F
+Exec=/home/lunarphoton/.local/bin/pc-connect-send %U
 
 [Desktop Action browsePhone]
 Name=Browse Phone Storage...
 Icon=folder-remote
-Exec=pc-connect browse
+Exec=/home/lunarphoton/.local/bin/pc-connect browse
