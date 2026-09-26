@@ -5,7 +5,17 @@ import glob
 import json
 import time
 
-CONFIG_FILE = os.path.expanduser('~/.config/pc-authenticator/config.json')
+def get_config_file():
+    target_user = os.environ.get('SUDO_USER') or os.environ.get('REAL_USER') or os.environ.get('USER')
+    if target_user and target_user != 'root':
+        user_config = os.path.expanduser(f"~{target_user}/.config/pc-authenticator/config.json")
+        if os.path.exists(user_config) or os.path.exists(os.path.dirname(user_config)):
+            return user_config
+    if os.path.exists('/etc/pc-auth/config.json'):
+        return '/etc/pc-auth/config.json'
+    return os.path.expanduser('~/.config/pc-authenticator/config.json')
+
+CONFIG_FILE = get_config_file()
 
 def get_usb_devices():
     devices = {}

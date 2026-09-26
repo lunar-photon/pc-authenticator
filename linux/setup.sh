@@ -6,7 +6,7 @@
 
 set -eo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
 
 # Colors for terminal output
 RED='\033[0;31m'
@@ -16,16 +16,13 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-# Auto-elevate to root via sudo if needed (except for status and help)
-if [ "$EUID" -ne 0 ]; then
-    if [ "$1" == "--status" ] || [ "$1" == "-s" ] || [ "$1" == "--help" ] || [ "$1" == "-h" ]; then
-        :
-    else
+require_root() {
+    if [ "$EUID" -ne 0 ]; then
         REAL_USER="$USER"
         export REAL_USER
         exec sudo -E bash "$0" "$@"
     fi
-fi
+}
 
 TARGET_USER="${REAL_USER:-${SUDO_USER:-$USER}}"
 if [ "$TARGET_USER" == "root" ]; then
@@ -139,6 +136,7 @@ EOF
 }
 
 install_passwordless() {
+    require_root --install
     print_banner
     echo -e "${BOLD}Installing Mode 1: Passwordless Mobile Unlock${NC}"
     echo -e "Press Enter on empty password field to unlock with Phone Fingerprint."
@@ -177,6 +175,7 @@ EOF
 }
 
 install_2fa() {
+    require_root --2fa
     print_banner
     echo -e "${BOLD}Installing Mode 2: Strict 2FA (Password + Mobile Biometric)${NC}"
     echo -e "Requires typing your Linux password first, then approving on phone.\n"
@@ -210,6 +209,7 @@ EOF
 }
 
 revert_to_password() {
+    require_root --revert
     print_banner
     echo -e "${YELLOW}[*] Reverting lock screen to standard password-only...${NC}"
 
