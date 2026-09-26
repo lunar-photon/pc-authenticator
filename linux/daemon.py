@@ -141,10 +141,98 @@ def get_mpris_players():
     except Exception:
         return []
 
+def adjust_system_volume(direction):
+    """Adjust system master volume via PipeWire (wpctl), PulseAudio (pactl), or ALSA (amixer)"""
+    if direction in ("up", "VolumeUp"):
+        if shutil.which('wpctl'):
+            try:
+                res = subprocess.run(['wpctl', 'set-volume', '-l', '1.0', '@DEFAULT_AUDIO_SINK@', '5%+'], capture_output=True)
+                if res.returncode == 0:
+                    return True
+            except Exception:
+                pass
+        if shutil.which('pactl'):
+            try:
+                res = subprocess.run(['pactl', 'set-sink-volume', '@DEFAULT_SINK@', '+5%'], capture_output=True)
+                if res.returncode == 0:
+                    return True
+            except Exception:
+                pass
+        if shutil.which('amixer'):
+            try:
+                res = subprocess.run(['amixer', '-D', 'pulse', 'sset', 'Master', '5%+'], capture_output=True)
+                if res.returncode == 0:
+                    return True
+            except Exception:
+                pass
+    elif direction in ("down", "VolumeDown"):
+        if shutil.which('wpctl'):
+            try:
+                res = subprocess.run(['wpctl', 'set-volume', '@DEFAULT_AUDIO_SINK@', '5%-'], capture_output=True)
+                if res.returncode == 0:
+                    return True
+            except Exception:
+                pass
+        if shutil.which('pactl'):
+            try:
+                res = subprocess.run(['pactl', 'set-sink-volume', '@DEFAULT_SINK@', '-5%'], capture_output=True)
+                if res.returncode == 0:
+                    return True
+            except Exception:
+                pass
+        if shutil.which('amixer'):
+            try:
+                res = subprocess.run(['amixer', '-D', 'pulse', 'sset', 'Master', '5%-'], capture_output=True)
+                if res.returncode == 0:
+                    return True
+            except Exception:
+                pass
+    elif direction in ("mute", "toggle_mute", "VolumeMute"):
+        if shutil.which('wpctl'):
+            try:
+                res = subprocess.run(['wpctl', 'set-mute', '@DEFAULT_AUDIO_SINK@', 'toggle'], capture_output=True)
+                if res.returncode == 0:
+                    return True
+            except Exception:
+                pass
+        if shutil.which('pactl'):
+            try:
+                res = subprocess.run(['pactl', 'set-sink-mute', '@DEFAULT_SINK@', 'toggle'], capture_output=True)
+                if res.returncode == 0:
+                    return True
+            except Exception:
+                pass
+    return False
+
+def get_system_volume():
+    try:
+        if shutil.which('wpctl'):
+            out = subprocess.check_output(['wpctl', 'get-volume', '@DEFAULT_AUDIO_SINK@'], stderr=subprocess.DEVNULL).decode().strip()
+            parts = out.split()
+            if len(parts) >= 2 and parts[0] == 'Volume:':
+                vol = int(round(float(parts[1]) * 100))
+                is_muted = '[MUTED]' in out
+                return vol, is_muted
+        if shutil.which('pactl'):
+            out = subprocess.check_output(['pactl', 'get-sink-volume', '@DEFAULT_SINK@'], stderr=subprocess.DEVNULL).decode()
+            import re
+            m = re.search(r'(\d+)%', out)
+            if m:
+                return int(m.group(1)), False
+    except Exception:
+        pass
+    return 50, False
+
 def get_mpris_status():
+    vol, is_muted = get_system_volume()
     players = get_mpris_players()
     if not players:
-        return {"has_player": False}
+        return {
+            "has_player": False,
+            "volume": vol,
+            "is_muted": is_muted,
+            "title": f"System Volume: {vol}%"
+        }
     chosen = players[0]
     chosen_status = "Stopped"
     for p in players:
@@ -182,10 +270,21 @@ def get_mpris_status():
         "title": title or "Unknown Title",
         "artist": artist or "Unknown Artist",
         "album": album,
-        "art_url": art_url
+        "art_url": art_url,
+        "volume": vol,
+        "is_muted": is_muted
     }
 
 def send_mpris_command(command):
+    # 1. Volume commands always control master system audio output
+    if command in ("VolumeUp", "volup", "volume_up"):
+        return adjust_system_volume("up")
+    elif command in ("VolumeDown", "voldown", "volume_down"):
+        return adjust_system_volume("down")
+    elif command in ("VolumeMute", "mute", "toggle_mute"):
+        return adjust_system_volume("mute")
+
+    # 2. Playback commands target MPRIS players
     players = get_mpris_players()
     if not players:
         return False
@@ -202,22 +301,6 @@ def send_mpris_command(command):
     if command in ("PlayPause", "Play", "Pause", "Next", "Previous", "Stop"):
         subprocess.run(['qdbus6', target, '/org/mpris/MediaPlayer2', f'org.mpris.MediaPlayer2.Player.{command}'], stderr=subprocess.DEVNULL)
         return True
-    elif command == "VolumeUp":
-        try:
-            curr = float(subprocess.check_output(['qdbus6', target, '/org/mpris/MediaPlayer2', 'org.mpris.MediaPlayer2.Player.Volume'], stderr=subprocess.DEVNULL).decode().strip())
-            new_vol = min(1.0, curr + 0.05)
-            subprocess.run(['qdbus6', target, '/org/mpris/MediaPlayer2', 'org.mpris.MediaPlayer2.Player.Volume', str(new_vol)], stderr=subprocess.DEVNULL)
-            return True
-        except Exception:
-            pass
-    elif command == "VolumeDown":
-        try:
-            curr = float(subprocess.check_output(['qdbus6', target, '/org/mpris/MediaPlayer2', 'org.mpris.MediaPlayer2.Player.Volume'], stderr=subprocess.DEVNULL).decode().strip())
-            new_vol = max(0.0, curr - 0.05)
-            subprocess.run(['qdbus6', target, '/org/mpris/MediaPlayer2', 'org.mpris.MediaPlayer2.Player.Volume', str(new_vol)], stderr=subprocess.DEVNULL)
-            return True
-        except Exception:
-            pass
     return False
 
 def get_kde_clipboard():
