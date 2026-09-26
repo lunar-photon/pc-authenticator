@@ -16,6 +16,7 @@ import android.hardware.biometrics.BiometricPrompt;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.CancellationSignal;
 import android.os.CountDownTimer;
 import android.os.Handler;
@@ -235,6 +236,7 @@ public class MainActivity extends Activity {
 
         // Request battery optimization exemption for uninterrupted background connection
         checkBatteryOptimization();
+        checkStoragePermissions();
 
         // Register receiver for background challenge alerts
         IntentFilter filter = new IntentFilter();
@@ -341,6 +343,38 @@ public class MainActivity extends Activity {
                     intent.setData(Uri.parse("package:" + getPackageName()));
                     startActivity(intent);
                 } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    private void checkStoragePermissions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                new AlertDialog.Builder(this)
+                        .setTitle("Allow Storage Access")
+                        .setMessage("To allow browsing, downloading, and sharing files between your laptop and phone, please enable 'Allow access to manage all files'.")
+                        .setPositiveButton("Grant Access", (dialog, which) -> {
+                            try {
+                                Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+                                intent.setData(Uri.parse("package:" + getPackageName()));
+                                startActivity(intent);
+                            } catch (Exception e) {
+                                try {
+                                    Intent intent = new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
+                                    startActivity(intent);
+                                } catch (Exception ignored) {}
+                            }
+                        })
+                        .setNegativeButton("Later", null)
+                        .show();
+            }
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED ||
+                checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{
+                        Manifest.permission.READ_EXTERNAL_STORAGE,
+                        Manifest.permission.WRITE_EXTERNAL_STORAGE
+                }, 102);
             }
         }
     }

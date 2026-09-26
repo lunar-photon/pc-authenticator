@@ -14,6 +14,11 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+import android.content.ContentUris;
+import android.database.Cursor;
+import android.provider.MediaStore;
+import java.util.HashSet;
+import java.util.Set;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -223,27 +228,91 @@ public class FileServer {
         }
 
         File[] files = dir.listFiles();
-        JSONArray arr = new JSONArray();
+        List<File> fileList = new ArrayList<>();
         if (files != null) {
-            List<File> fileList = new ArrayList<>(Arrays.asList(files));
-            // Sort: directories first, then alphabetically
-            Collections.sort(fileList, (a, b) -> {
-                if (a.isDirectory() && !b.isDirectory()) return -1;
-                if (!a.isDirectory() && b.isDirectory()) return 1;
-                return a.getName().compareToIgnoreCase(b.getName());
-            });
+            fileList.addAll(Arrays.asList(files));
+        }
 
-            for (File f : fileList) {
-                JSONObject obj = new JSONObject();
-                obj.put("name", f.getName());
-                obj.put("path", f.getAbsolutePath());
-                obj.put("is_dir", f.isDirectory());
-                obj.put("size", f.isDirectory() ? 0 : f.length());
-                obj.put("mtime", f.lastModified() / 1000);
-                arr.put(obj);
-            }
+        // Enrich with MediaStore to discover media/download files hidden by scoped storage
+        enrichWithMediaStore(targetPath, fileList);
+
+        // Sort: directories first, then alphabetically
+        Collections.sort(fileList, (a, b) -> {
+            if (a.isDirectory() && !b.isDirectory()) return -1;
+            if (!a.isDirectory() && b.isDirectory()) return 1;
+            return a.getName().compareToIgnoreCase(b.getName());
+        });
+
+        JSONArray arr = new JSONArray();
+        for (File f : fileList) {
+            JSONObject obj = new JSONObject();
+            obj.put("name", f.getName());
+            obj.put("path", f.getAbsolutePath());
+            obj.put("is_dir", f.isDirectory());
+            obj.put("size", f.isDirectory() ? 0 : f.length());
+            obj.put("mtime", f.lastModified() / 1000);
+            arr.put(obj);
         }
         sendJson(out, arr);
+    }
+
+    private void enrichWithMediaStore(String targetPath, List<File> fileList) {
+        try {
+            Set<String> existingNames = new HashSet<>();
+            for (File f : fileList) {
+                existingNames.add(f.getName());
+            }
+
+            File targetDir = new File(targetPath);
+            String targetCanonical = targetDir.getCanonicalPath();
+
+            Uri queryUri = MediaStore.Files.getContentUri("external");
+            String[] projection = {
+                    MediaStore.MediaColumns.DATA,
+                    MediaStore.MediaColumns.DISPLAY_NAME,
+                    MediaStore.MediaColumns.SIZE,
+                    MediaStore.MediaColumns.DATE_MODIFIED
+            };
+            String selection = MediaStore.MediaColumns.DATA + " LIKE ?";
+            String[] selectionArgs = new String[]{ targetCanonical + "/%" };
+
+            try (Cursor cursor = context.getContentResolver().query(queryUri, projection, selection, selectionArgs, null)) {
+                if (cursor != null) {
+                    int dataCol = cursor.getColumnIndex(MediaStore.MediaColumns.DATA);
+                    while (cursor.moveToNext()) {
+                        String filePath = (dataCol >= 0) ? cursor.getString(dataCol) : null;
+                        if (filePath != null && !filePath.isEmpty()) {
+                            File f = new File(filePath);
+                            File parent = f.getParentFile();
+                            if (parent != null && parent.getCanonicalPath().equals(targetCanonical)) {
+                                if (!existingNames.contains(f.getName())) {
+                                    fileList.add(f);
+                                    existingNames.add(f.getName());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "MediaStore query fallback error", e);
+        }
+    }
+
+    private Uri getContentUriForPath(String path) {
+        try {
+            Uri queryUri = MediaStore.Files.getContentUri("external");
+            String[] projection = { MediaStore.MediaColumns._ID };
+            String selection = MediaStore.MediaColumns.DATA + "=?";
+            String[] selectionArgs = new String[]{ path };
+            try (Cursor cursor = context.getContentResolver().query(queryUri, projection, selection, selectionArgs, null)) {
+                if (cursor != null && cursor.moveToFirst()) {
+                    long id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID));
+                    return ContentUris.withAppendedId(queryUri, id);
+                }
+            }
+        } catch (Exception ignored) {}
+        return null;
     }
 
     private void addShortcut(JSONArray arr, String name, String path) throws Exception {
@@ -263,27 +332,52 @@ public class FileServer {
             return;
         }
         File f = new File(path);
-        if (!f.exists() || !f.isFile()) {
-            sendError(out, 404, "File Not Found");
+        InputStream fis = null;
+        long length = 0;
+
+        if (f.exists() && f.canRead()) {
+            length = f.length();
+            try {
+                fis = new FileInputStream(f);
+            } catch (Exception ignored) {}
+        }
+
+        if (fis == null) {
+            // Try ContentResolver via MediaStore
+            Uri contentUri = getContentUriForPath(path);
+            if (contentUri != null) {
+                try {
+                    fis = context.getContentResolver().openInputStream(contentUri);
+                    try (Cursor c = context.getContentResolver().query(contentUri, new String[]{MediaStore.MediaColumns.SIZE}, null, null, null)) {
+                        if (c != null && c.moveToFirst()) {
+                            length = c.getLong(0);
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+        }
+
+        if (fis == null) {
+            sendError(out, 404, "File Not Found or Permission Denied");
             return;
         }
 
-        long length = f.length();
         String filename = URLEncoder.encode(f.getName(), "UTF-8").replace("+", "%20");
-
         String header = "HTTP/1.1 200 OK\r\n" +
                 "Content-Type: application/octet-stream\r\n" +
-                "Content-Length: " + length + "\r\n" +
+                (length > 0 ? "Content-Length: " + length + "\r\n" : "") +
                 "Content-Disposition: attachment; filename=\"" + filename + "\"\r\n" +
                 "Access-Control-Allow-Origin: *\r\n\r\n";
         out.write(header.getBytes("UTF-8"));
 
-        try (FileInputStream fis = new FileInputStream(f)) {
+        try {
             byte[] buf = new byte[65536];
             int read;
             while ((read = fis.read(buf)) != -1) {
                 out.write(buf, 0, read);
             }
+        } finally {
+            try { fis.close(); } catch (Exception ignored) {}
         }
         out.flush();
     }
