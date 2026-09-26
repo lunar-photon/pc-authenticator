@@ -498,7 +498,7 @@ class VirtualMouse:
         try:
             self.fd = os.open('/dev/uinput', os.O_WRONLY | os.O_NONBLOCK)
             fcntl.ioctl(self.fd, UI_SET_EVBIT, EV_KEY)
-            for btn in (BTN_LEFT, BTN_RIGHT, BTN_MIDDLE):
+            for btn in (BTN_LEFT, BTN_RIGHT, BTN_MIDDLE, 1, 63, 104, 105, 106, 109, 57, 48, 17):
                 fcntl.ioctl(self.fd, UI_SET_KEYBIT, btn)
 
             fcntl.ioctl(self.fd, UI_SET_EVBIT, EV_REL)
@@ -529,11 +529,17 @@ class VirtualMouse:
         if not self.fd:
             return
         with self.lock:
-            if dx != 0:
-                self.emit(EV_REL, REL_X, dx)
-            if dy != 0:
-                self.emit(EV_REL, REL_Y, dy)
-            self.emit(EV_SYN, 0, 0)
+            try:
+                idx = int(round(float(dx)))
+                idy = int(round(float(dy)))
+            except Exception:
+                return
+            if idx != 0:
+                self.emit(EV_REL, REL_X, idx)
+            if idy != 0:
+                self.emit(EV_REL, REL_Y, idy)
+            if idx != 0 or idy != 0:
+                self.emit(EV_SYN, 0, 0)
 
     def click(self, button="left"):
         if not self.fd:
@@ -571,6 +577,28 @@ class VirtualMouse:
                 self.emit(EV_REL, REL_HWHEEL, dx)
             self.emit(EV_SYN, 0, 0)
 
+    def press_key(self, key_name):
+        if not self.fd:
+            return
+        code_map = {
+            'next': 109,     # Page Down (Next slide)
+            'prev': 104,     # Page Up (Previous slide)
+            'right': 106,
+            'left': 105,
+            'f5': 63,        # Start presentation
+            'esc': 1,        # Exit presentation
+            'space': 57,
+            'b': 48,
+            'w': 17
+        }
+        code = code_map.get(str(key_name).lower())
+        if code:
+            with self.lock:
+                self.emit(EV_KEY, code, 1)
+                self.emit(EV_SYN, 0, 0)
+                self.emit(EV_KEY, code, 0)
+                self.emit(EV_SYN, 0, 0)
+
     def close(self):
         if self.fd:
             try:
@@ -581,6 +609,15 @@ class VirtualMouse:
             self.fd = None
 
 virtual_mouse = VirtualMouse()
+
+def trigger_laser_overlay(active=True):
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        msg = json.dumps({"laser": bool(active)}).encode('utf-8')
+        sock.sendto(msg, ('127.0.0.1', 1763))
+        sock.close()
+    except Exception:
+        pass
 
 def start_udp_mouse_listener(port=1762):
     def mouse_loop():
@@ -595,8 +632,16 @@ def start_udp_mouse_listener(port=1762):
                 try:
                     payload = json.loads(data.decode('utf-8'))
                     mtype = payload.get('type', '')
-                    if mtype == 'move':
+                    if mtype in ('move', 'pointer'):
                         virtual_mouse.move(payload.get('dx', 0), payload.get('dy', 0))
+                        if mtype == 'pointer':
+                            laser = payload.get('laser', True)
+                            trigger_laser_overlay(laser)
+                    elif mtype == 'laser_state':
+                        laser = payload.get('laser', False)
+                        trigger_laser_overlay(laser)
+                    elif mtype == 'key':
+                        virtual_mouse.press_key(payload.get('key', ''))
                     elif mtype == 'click':
                         virtual_mouse.click(payload.get('button', 'left'))
                     elif mtype == 'down':
@@ -1424,8 +1469,16 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": "unauthorized"}, status=401)
                 return
             mtype = body.get('type', '')
-            if mtype == 'move':
+            if mtype in ('move', 'pointer'):
                 virtual_mouse.move(body.get('dx', 0), body.get('dy', 0))
+                if mtype == 'pointer':
+                    laser = body.get('laser', True)
+                    trigger_laser_overlay(laser)
+            elif mtype == 'laser_state':
+                laser = body.get('laser', False)
+                trigger_laser_overlay(laser)
+            elif mtype == 'key':
+                virtual_mouse.press_key(body.get('key', ''))
             elif mtype == 'click':
                 virtual_mouse.click(body.get('button', 'left'))
             elif mtype == 'down':

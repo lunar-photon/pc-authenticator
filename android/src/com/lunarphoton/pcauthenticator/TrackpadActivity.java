@@ -4,6 +4,11 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.Color;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -11,8 +16,10 @@ import android.os.Vibrator;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -27,7 +34,7 @@ import java.net.URL;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 
-public class TrackpadActivity extends Activity {
+public class TrackpadActivity extends Activity implements SensorEventListener {
     private PairedDevice activeDevice;
     private DatagramSocket udpSocket;
     private InetAddress pcAddress;
@@ -56,13 +63,36 @@ public class TrackpadActivity extends Activity {
     private long twoFingerDownTime;
     private boolean twoFingerMoved = false;
 
+    // Laser Pointer & Presentation Remote
+    private SensorManager sensorManager;
+    private Sensor gyroSensor;
+    private boolean isGyroActive = false;
+    private boolean isGyroLocked = false;
+    private float filterX = 0f, filterY = 0f;
+    private float accumX = 0f, accumY = 0f;
+    private long suppressGyroUntil = 0;
+
+    // Mode UI elements
+    private Button btnModeTrackpad;
+    private Button btnModePointer;
+    private View touchpadSurface;
+    private LinearLayout layoutPointerSurface;
+    private View btnLaserAim;
+    private TextView tvLaserStatus;
+    private Button btnLockGyro;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setContentView(R.layout.activity_trackpad);
 
         activeDevice = DeviceManager.getActiveDevice(this);
         vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+        sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        if (sensorManager != null) {
+            gyroSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
+        }
 
         TextView tvTarget = findViewById(R.id.tv_trackpad_target);
         if (activeDevice != null && activeDevice.hostname != null) {
@@ -92,12 +122,200 @@ public class TrackpadActivity extends Activity {
         findViewById(R.id.btn_trackpad_keyboard).setOnClickListener(v -> showKeyboardDialog());
 
         setupTouchpad();
+        setupModeSwitcher();
+        setupLaserPointer();
         setupClickButtons();
         startNetworkSender();
+
+        // Check if launched directly in pointer mode
+        String mode = getIntent().getStringExtra("mode");
+        if ("pointer".equalsIgnoreCase(mode)) {
+            switchToMode(false);
+        }
     }
 
     private void updateSensitivityDisplay() {
         tvSensitivity.setText(String.format("Sensitivity: %.1fx", sensitivity));
+    }
+
+    private void setupModeSwitcher() {
+        btnModeTrackpad = findViewById(R.id.btn_mode_trackpad);
+        btnModePointer = findViewById(R.id.btn_mode_pointer);
+        touchpadSurface = findViewById(R.id.touchpad_surface);
+        layoutPointerSurface = findViewById(R.id.layout_pointer_surface);
+
+        btnModeTrackpad.setOnClickListener(v -> switchToMode(true));
+        btnModePointer.setOnClickListener(v -> switchToMode(false));
+    }
+
+    private void switchToMode(boolean isTrackpad) {
+        if (isTrackpad) {
+            touchpadSurface.setVisibility(View.VISIBLE);
+            layoutPointerSurface.setVisibility(View.GONE);
+            btnModeTrackpad.setTextColor(Color.parseColor("#06b6d4"));
+            btnModePointer.setTextColor(Color.parseColor("#64748b"));
+
+            if (isGyroActive || isGyroLocked) {
+                isGyroLocked = false;
+                enableGyro(false);
+                sendLaserState(false);
+                updateLaserStatusUi(false);
+            }
+        } else {
+            touchpadSurface.setVisibility(View.GONE);
+            layoutPointerSurface.setVisibility(View.VISIBLE);
+            btnModePointer.setTextColor(Color.parseColor("#06b6d4"));
+            btnModeTrackpad.setTextColor(Color.parseColor("#64748b"));
+        }
+    }
+
+    private void setupLaserPointer() {
+        btnLaserAim = findViewById(R.id.btn_laser_aim);
+        tvLaserStatus = findViewById(R.id.tv_laser_status);
+        btnLockGyro = findViewById(R.id.btn_lock_gyro);
+
+        Button btnSlidePrev = findViewById(R.id.btn_slide_prev);
+        Button btnSlideF5 = findViewById(R.id.btn_slide_f5);
+        Button btnSlideNext = findViewById(R.id.btn_slide_next);
+
+        btnLaserAim.setOnTouchListener((v, event) -> {
+            int action = event.getActionMasked();
+            switch (action) {
+                case MotionEvent.ACTION_DOWN:
+                    if (!isGyroActive) {
+                        enableGyro(true);
+                    }
+                    sendLaserState(true);
+                    updateLaserStatusUi(true);
+                    vibrate(25);
+                    return true;
+
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    if (!isGyroLocked) {
+                        enableGyro(false);
+                        sendLaserState(false);
+                        updateLaserStatusUi(false);
+                    }
+                    return true;
+            }
+            return false;
+        });
+
+        btnLockGyro.setOnClickListener(v -> {
+            isGyroLocked = !isGyroLocked;
+            if (isGyroLocked) {
+                btnLockGyro.setText("🔓 Pointer Locked ON (Tap to Unlock)");
+                btnLockGyro.setTextColor(Color.parseColor("#10b981"));
+                enableGyro(true);
+                sendLaserState(true);
+                updateLaserStatusUi(true);
+                vibrate(35);
+            } else {
+                btnLockGyro.setText("🔒 Lock Pointer ON");
+                btnLockGyro.setTextColor(Color.parseColor("#94a3b8"));
+                enableGyro(false);
+                sendLaserState(false);
+                updateLaserStatusUi(false);
+                vibrate(20);
+            }
+        });
+
+        btnSlidePrev.setOnClickListener(v -> {
+            suppressGyroUntil = System.currentTimeMillis() + 180;
+            sendKeyAction("prev");
+            vibrate(20);
+        });
+
+        btnSlideF5.setOnClickListener(v -> {
+            suppressGyroUntil = System.currentTimeMillis() + 180;
+            sendKeyAction("f5");
+            vibrate(30);
+        });
+
+        btnSlideNext.setOnClickListener(v -> {
+            suppressGyroUntil = System.currentTimeMillis() + 180;
+            sendKeyAction("next");
+            vibrate(20);
+        });
+    }
+
+    private void updateLaserStatusUi(boolean active) {
+        if (btnLaserAim != null && tvLaserStatus != null) {
+            if (active) {
+                btnLaserAim.setBackgroundResource(R.drawable.btn_laser_active);
+                tvLaserStatus.setText(isGyroLocked ? "🎯 POINTER LOCKED ON" : "🎯 POINTING ACTIVE");
+                tvLaserStatus.setTextColor(Color.parseColor("#ef4444"));
+            } else {
+                btnLaserAim.setBackgroundResource(R.drawable.btn_laser_idle);
+                tvLaserStatus.setText("🔴 HOLD TO POINT");
+                tvLaserStatus.setTextColor(Color.parseColor("#ef4444"));
+            }
+        }
+    }
+
+    private void enableGyro(boolean enable) {
+        if (sensorManager == null || gyroSensor == null) {
+            if (enable) {
+                Toast.makeText(this, "Gyroscope sensor not available on this device", Toast.LENGTH_SHORT).show();
+            }
+            return;
+        }
+
+        if (enable && !isGyroActive) {
+            filterX = 0f;
+            filterY = 0f;
+            accumX = 0f;
+            accumY = 0f;
+            sensorManager.registerListener(this, gyroSensor, SensorManager.SENSOR_DELAY_GAME);
+            isGyroActive = true;
+        } else if (!enable && isGyroActive) {
+            sensorManager.unregisterListener(this);
+            isGyroActive = false;
+        }
+    }
+
+    @Override
+    public void onSensorChanged(SensorEvent event) {
+        if (event == null || event.sensor.getType() != Sensor.TYPE_GYROSCOPE) {
+            return;
+        }
+        if (System.currentTimeMillis() < suppressGyroUntil) {
+            return;
+        }
+
+        float[] values = event.values;
+        // KDE Connect formula:
+        // Yaw (axis 2, Z-axis) moves horizontal cursor X
+        // Pitch (axis 0, X-axis) moves vertical cursor Y
+        float scale = 65.0f * (sensitivity / 1.2f);
+        float rawX = -values[2] * scale;
+        float rawY = -values[0] * scale;
+
+        // Deadband filter to prevent natural hand trembling when holding still
+        if (Math.abs(rawX) < 0.25f) rawX = 0f;
+        if (Math.abs(rawY) < 0.25f) rawY = 0f;
+
+        // Low-pass exponential moving average filter for buttery smooth tracking
+        filterX = 0.75f * rawX + 0.25f * filterX;
+        filterY = 0.75f * rawY + 0.25f * filterY;
+
+        accumX += filterX;
+        accumY += filterY;
+
+        int dx = Math.round(accumX);
+        int dy = Math.round(accumY);
+
+        if (dx != 0 || dy != 0) {
+            accumX -= dx;
+            accumY -= dy;
+            sendPointerMove(dx, dy);
+        }
+    }
+
+    @Override
+    public void onAccuracyChanged(Sensor sensor, int accuracy) {
+        // Not used
     }
 
     private void setupTouchpad() {
@@ -175,7 +393,6 @@ public class TrackpadActivity extends Activity {
 
                         if (Math.abs(diffY) > 12 || Math.abs(diffX) > 12) {
                             twoFingerMoved = true;
-                            // Natural scrolling: fingers moving up -> scroll down; fingers moving down -> scroll up
                             int scrollY = 0;
                             if (Math.abs(diffY) > 12) {
                                 scrollY = (diffY > 0) ? 1 : -1;
@@ -211,6 +428,7 @@ public class TrackpadActivity extends Activity {
         Button btnRight = findViewById(R.id.btn_click_right);
 
         btnLeft.setOnTouchListener((v, event) -> {
+            suppressGyroUntil = System.currentTimeMillis() + 180;
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
                 sendMouseAction("down", "left");
                 vibrate(20);
@@ -223,11 +441,13 @@ public class TrackpadActivity extends Activity {
         });
 
         btnRight.setOnClickListener(v -> {
+            suppressGyroUntil = System.currentTimeMillis() + 180;
             sendMouseAction("click", "right");
             vibrate(30);
         });
 
         btnMiddle.setOnClickListener(v -> {
+            suppressGyroUntil = System.currentTimeMillis() + 180;
             sendMouseAction("click", "middle");
             vibrate(20);
         });
@@ -290,6 +510,35 @@ public class TrackpadActivity extends Activity {
             obj.put("type", "move");
             obj.put("dx", dx);
             obj.put("dy", dy);
+            sendQueue.offer(obj);
+        } catch (Exception ignored) {}
+    }
+
+    private void sendPointerMove(int dx, int dy) {
+        try {
+            JSONObject obj = new JSONObject();
+            obj.put("type", "pointer");
+            obj.put("dx", dx);
+            obj.put("dy", dy);
+            obj.put("laser", true);
+            sendQueue.offer(obj);
+        } catch (Exception ignored) {}
+    }
+
+    private void sendLaserState(boolean active) {
+        try {
+            JSONObject obj = new JSONObject();
+            obj.put("type", "laser_state");
+            obj.put("laser", active);
+            sendQueue.offer(obj);
+        } catch (Exception ignored) {}
+    }
+
+    private void sendKeyAction(String key) {
+        try {
+            JSONObject obj = new JSONObject();
+            obj.put("type", "key");
+            obj.put("key", key);
             sendQueue.offer(obj);
         } catch (Exception ignored) {}
     }
@@ -376,8 +625,20 @@ public class TrackpadActivity extends Activity {
     }
 
     @Override
+    protected void onPause() {
+        if (isGyroActive) {
+            enableGyro(false);
+            sendLaserState(false);
+            updateLaserStatusUi(false);
+        }
+        super.onPause();
+    }
+
+    @Override
     protected void onDestroy() {
         isRunning = false;
+        enableGyro(false);
+        sendLaserState(false);
         if (workerThread != null) {
             workerThread.interrupt();
         }

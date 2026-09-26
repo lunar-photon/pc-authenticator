@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QInputDialog, QProgressBar
 )
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QSize
-from PyQt6.QtGui import QIcon, QAction, QFont, QColor, QDragEnterEvent, QDropEvent
+from PyQt6.QtGui import QIcon, QAction, QFont, QColor, QDragEnterEvent, QDropEvent, QCursor
 
 DAEMON_URL = "http://127.0.0.1:1760"
 
@@ -412,6 +412,89 @@ class PhoneExplorerWindow(QMainWindow):
         self.load_directory(self.current_path)
 
 # ==========================================
+# Laser Pointer Overlay (KDE Connect Style)
+# ==========================================
+
+class LaserPointerOverlay(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint |
+            Qt.WindowType.SubWindow |
+            Qt.WindowType.WindowTransparentForInput
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setFixedSize(54, 54)
+        self.hide()
+
+        self.fade_timer = QTimer(self)
+        self.fade_timer.setSingleShot(True)
+        self.fade_timer.timeout.connect(self.hide_overlay)
+
+        self.track_timer = QTimer(self)
+        self.track_timer.setInterval(16)  # ~60 fps
+        self.track_timer.timeout.connect(self.update_position)
+
+    def trigger(self, active=True):
+        if active:
+            self.update_position()
+            self.show()
+            self.raise_()
+            if not self.track_timer.isActive():
+                self.track_timer.start()
+            self.fade_timer.start(1200)
+        else:
+            self.hide_overlay()
+
+    def hide_overlay(self):
+        self.track_timer.stop()
+        self.hide()
+
+    def update_position(self):
+        pos = QCursor.pos()
+        self.move(pos.x() - 27, pos.y() - 27)
+
+    def paintEvent(self, event):
+        from PyQt6.QtGui import QPainter, QRadialGradient, QColor
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Draw glowing red laser dot with white core
+        grad = QRadialGradient(27, 27, 26)
+        grad.setColorAt(0.0, QColor(255, 255, 255, 255))      # White-hot core
+        grad.setColorAt(0.18, QColor(255, 255, 255, 240))
+        grad.setColorAt(0.3, QColor(255, 23, 68, 255))        # Intense neon red
+        grad.setColorAt(0.55, QColor(255, 23, 68, 160))       # Red halo
+        grad.setColorAt(0.82, QColor(255, 0, 0, 60))          # Outer glow
+        grad.setColorAt(1.0, QColor(255, 0, 0, 0))            # Transparent edge
+
+        painter.setBrush(grad)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(1, 1, 52, 52)
+
+
+class LaserListenerThread(QThread):
+    laser_signal = pyqtSignal(bool)
+
+    def run(self):
+        import socket
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(('127.0.0.1', 1763))
+            while True:
+                data, _ = sock.recvfrom(1024)
+                try:
+                    payload = json.loads(data.decode('utf-8'))
+                    self.laser_signal.emit(bool(payload.get('laser', False)))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+# ==========================================
 # System Tray Application
 # ==========================================
 
@@ -426,6 +509,12 @@ class PCConnectTrayApp:
         self.tray.setVisible(True)
 
         self.explorer_window = None
+
+        # Laser pointer overlay listener
+        self.laser_overlay = LaserPointerOverlay()
+        self.laser_thread = LaserListenerThread()
+        self.laser_thread.laser_signal.connect(self.laser_overlay.trigger)
+        self.laser_thread.start()
 
         self.menu = QMenu()
         self.build_menu()

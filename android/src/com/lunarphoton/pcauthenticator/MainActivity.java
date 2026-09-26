@@ -67,6 +67,7 @@ public class MainActivity extends Activity {
     private Button btnRingPc;
     private Button btnLockPc;
     private Button btnRemoteTrackpad;
+    private Button btnLaserPointer;
     private Button btnOpenWebpage;
 
     private TextView tvMediaStatus;
@@ -167,6 +168,7 @@ public class MainActivity extends Activity {
         btnRingPc = findViewById(R.id.btn_ring_pc);
         btnLockPc = findViewById(R.id.btn_lock_pc);
         btnRemoteTrackpad = findViewById(R.id.btn_remote_trackpad);
+        btnLaserPointer = findViewById(R.id.btn_laser_pointer);
         btnOpenWebpage = findViewById(R.id.btn_open_webpage);
 
         tvMediaStatus = findViewById(R.id.tv_media_status);
@@ -1087,6 +1089,13 @@ public class MainActivity extends Activity {
         if (btnRemoteTrackpad != null) {
             btnRemoteTrackpad.setOnClickListener(v -> {
                 Intent intent = new Intent(MainActivity.this, TrackpadActivity.class);
+                startActivity(intent);
+            });
+        }
+        if (btnLaserPointer != null) {
+            btnLaserPointer.setOnClickListener(v -> {
+                Intent intent = new Intent(MainActivity.this, TrackpadActivity.class);
+                intent.putExtra("mode", "pointer");
                 startActivity(intent);
             });
         }

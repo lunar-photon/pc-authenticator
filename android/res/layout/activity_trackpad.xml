@@ -98,6 +98,38 @@
             android:background="@drawable/card_bg" />
     </LinearLayout>
 
+    <!-- Mode Switcher Tabs -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:orientation="horizontal"
+        android:layout_marginBottom="10dp">
+
+        <Button
+            android:id="@+id/btn_mode_trackpad"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:text="🖱️ Touchpad"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/accent_cyan"
+            android:background="@drawable/card_bg"
+            android:layout_marginEnd="4dp" />
+
+        <Button
+            android:id="@+id/btn_mode_pointer"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:text="🎯 Laser Pointer"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_muted"
+            android:background="@drawable/card_bg"
+            android:layout_marginStart="4dp" />
+    </LinearLayout>
+
     <!-- Main Touchpad Surface -->
     <FrameLayout
         android:id="@+id/touchpad_surface"
@@ -149,6 +181,111 @@
                 android:layout_marginTop="3dp" />
         </LinearLayout>
     </FrameLayout>
+
+    <!-- Laser Pointer Surface (Presentation Remote) -->
+    <LinearLayout
+        android:id="@+id/layout_pointer_surface"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:visibility="gone"
+        android:background="@drawable/trackpad_surface"
+        android:padding="16dp">
+
+        <!-- Big Hold-to-Aim Laser Button -->
+        <FrameLayout
+            android:id="@+id/btn_laser_aim"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:background="@drawable/btn_laser_idle"
+            android:clickable="true"
+            android:focusable="true">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tv_laser_status"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🔴 HOLD TO POINT"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:textColor="#ef4444" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Move phone in the air to control laser pointer"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_muted"
+                    android:layout_marginTop="6dp" />
+            </LinearLayout>
+        </FrameLayout>
+
+        <!-- Lock Gyro Toggle -->
+        <Button
+            android:id="@+id/btn_lock_gyro"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:text="🔒 Lock Pointer ON"
+            android:textSize="12sp"
+            android:textColor="@color/text_muted"
+            android:background="@drawable/card_bg"
+            android:layout_marginTop="10dp" />
+
+        <!-- Presentation Slide Controls -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:orientation="horizontal"
+            android:layout_marginTop="10dp">
+
+            <Button
+                android:id="@+id/btn_slide_prev"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:text="◀ Prev"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_white"
+                android:background="@drawable/card_bg"
+                android:layout_marginEnd="4dp" />
+
+            <Button
+                android:id="@+id/btn_slide_f5"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:text="▶ Slide (F5)"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="@color/accent_cyan"
+                android:background="@drawable/card_bg"
+                android:layout_marginStart="4dp"
+                android:layout_marginEnd="4dp" />
+
+            <Button
+                android:id="@+id/btn_slide_next"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:text="Next ▶"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_white"
+                android:background="@drawable/card_bg"
+                android:layout_marginStart="4dp" />
+        </LinearLayout>
+    </LinearLayout>
 
     <!-- Bottom Buttons: Left Click & Right Click -->
     <LinearLayout
