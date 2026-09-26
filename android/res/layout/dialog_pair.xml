@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@color/card_bg"
+    android:padding="20dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="🔒 End-to-End Pair"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:textColor="@color/text_white" />
+
+    <TextView
+        android:id="@+id/tv_pair_target"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="cachyos-x8664"
+        android:textSize="13sp"
+        android:textColor="@color/accent_cyan"
+        android:layout_marginTop="4dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="A 6-digit PIN has been sent to your laptop screen (desktop notification). Enter it below to authorize this phone:"
+        android:textSize="12sp"
+        android:textColor="@color/text_muted"
+        android:layout_marginTop="8dp" />
+
+    <EditText
+        android:id="@+id/et_pair_pin"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="• • • • • •"
+        android:textColor="@color/accent_cyan"
+        android:textColorHint="@color/text_muted"
+        android:textSize="26sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:layout_marginTop="16dp"
+        android:layout_marginBottom="8dp"
+        android:inputType="number"
+        android:maxLength="6"
+        android:singleLine="true" />
+
+    <TextView
+        android:id="@+id/tv_pair_status"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Waiting for PIN entry..."
+        android:textSize="12sp"
+        android:textColor="@color/text_muted"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginBottom="12dp" />
+
+    <Button
+        android:id="@+id/btn_pair_resend"
+        android:layout_width="wrap_content"
+        android:layout_height="32dp"
+        android:text="🔄 Resend PIN to Laptop"
+        android:textSize="11sp"
+        android:textColor="@color/text_muted"
+        android:background="@null"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginBottom="12dp" />
+
+</LinearLayout>

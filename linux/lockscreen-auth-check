@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+import os
+import sys
+import glob
+import json
+import urllib.request
+import urllib.error
+
+USER = os.environ.get('PAM_USER', 'lunarphoton')
+HOME = os.path.expanduser(f"~{USER}")
+CONFIG_PATHS = [
+    "/etc/pc-auth/config.json",
+    os.path.join(HOME, ".config/pc-authenticator/config.json")
+]
+
+def load_config():
+    for p in CONFIG_PATHS:
+        if os.path.exists(p):
+            try:
+                with open(p, 'r') as f:
+                    return json.load(f)
+            except Exception:
+                pass
+    return {
+        "web_port": 1760,
+        "auth_timeout_seconds": 35,
+        "failmode": "secure",
+        "allowed_usb_serials": []
+    }
+
+def check_usb_presence(allowed_serials):
+    if not allowed_serials:
+        return False
+    
+    for dev_path in glob.glob('/sys/bus/usb/devices/*'):
+        serial_file = os.path.join(dev_path, 'serial')
+        if os.path.exists(serial_file):
+            try:
+                with open(serial_file, 'r', errors='ignore') as f:
+                    s = f.read().strip()
+                if s and s in allowed_serials:
+                    return True
+            except Exception:
+                pass
+    return False
+
+def get_entered_password():
+    try:
+        if not sys.stdin.isatty():
+            data = sys.stdin.buffer.read()
+            if data:
+                return data.rstrip(b'\x00\r\n').decode('utf-8', errors='ignore')
+    except Exception:
+        pass
+    return ""
+
+def main():
+    cfg = load_config()
+    allowed_serials = cfg.get("allowed_usb_serials", [])
+    port = cfg.get("web_port", 1760)
+    failmode = cfg.get("failmode", "secure")
+
+    # In passwordless mode: if the user typed their password, skip phone check
+    # and immediately let PAM's standard unix password module verify it.
+    if "--passwordless" in sys.argv:
+        entered_pwd = get_entered_password()
+        if entered_pwd:
+            sys.exit(1)
+
+    # 1. Check USB Hardware Presence (Smart Dual Mode)
+    if check_usb_presence(allowed_serials):
+        # USB phone detected! Instant unlock
+        sys.exit(0)
+
+    # 2. Check Wireless Push Approval via Daemon
+    base_url = f"http://127.0.0.1:{port}"
+    try:
+        # Check if daemon is active
+        req = urllib.request.Request(f"{base_url}/api/info")
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            if resp.status != 200:
+                raise Exception("Daemon returned non-200 status")
+    except Exception:
+        # Daemon is not running or unreachable
+        if failmode == "safe":
+            # Allow fallback to password so user is never locked out
+            sys.exit(0)
+        else:
+            sys.exit(1)
+
+    # Request challenge
+    try:
+        req_data = json.dumps({"user": USER}).encode('utf-8')
+        req = urllib.request.Request(
+            f"{base_url}/api/request_auth",
+            data=req_data,
+            headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            challenge = json.loads(resp.read().decode('utf-8'))
+            session_id = challenge.get("session_id")
+        
+        if not session_id:
+            if failmode == "safe":
+                sys.exit(0)
+            sys.exit(1)
+
+        # Wait for phone approval
+        wait_req = urllib.request.Request(f"{base_url}/api/wait_auth?session_id={session_id}")
+        # Allow extra 5 seconds on top of timeout
+        with urllib.request.urlopen(wait_req, timeout=cfg.get("auth_timeout_seconds", 35) + 5) as resp:
+            result = json.loads(resp.read().decode('utf-8'))
+            status = result.get("status")
+            if status == "approved":
+                sys.exit(0)
+            else:
+                sys.exit(1)
+
+    except Exception:
+        if failmode == "safe":
+            sys.exit(0)
+        sys.exit(1)
+
+if __name__ == '__main__':
+    main()

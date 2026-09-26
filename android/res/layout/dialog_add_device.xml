@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@color/card_bg"
+    android:padding="20dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Pair to New PC / Laptop"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:textColor="@color/text_white" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Enter the IP address of the laptop running PC Authenticator:"
+        android:textSize="13sp"
+        android:textColor="@color/text_muted"
+        android:layout_marginTop="6dp" />
+
+    <EditText
+        android:id="@+id/et_dialog_ip"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="e.g. 192.168.48.40"
+        android:textColor="@color/text_white"
+        android:textColorHint="@color/text_muted"
+        android:textSize="14sp"
+        android:layout_marginTop="16dp"
+        android:singleLine="true" />
+
+    <EditText
+        android:id="@+id/et_dialog_port"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="1760"
+        android:hint="Port (default: 1760)"
+        android:textColor="@color/text_white"
+        android:textColorHint="@color/text_muted"
+        android:textSize="14sp"
+        android:layout_marginTop="10dp"
+        android:inputType="number"
+        android:singleLine="true" />
+
+    <TextView
+        android:id="@+id/tv_dialog_error"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text=""
+        android:textSize="12sp"
+        android:textColor="@color/status_red"
+        android:layout_marginTop="8dp"
+        android:visibility="gone" />
+
+</LinearLayout>

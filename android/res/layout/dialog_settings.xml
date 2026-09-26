@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@color/card_bg"
+    android:padding="20dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="⚙️ Security &amp; Settings"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:textColor="@color/text_white" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Configure authentication preferences"
+        android:textSize="12sp"
+        android:textColor="@color/text_muted"
+        android:layout_marginTop="2dp"
+        android:layout_marginBottom="16dp" />
+
+    <!-- Biometric Setting Row -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:padding="12dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="👆"
+            android:textSize="22sp"
+            android:layout_marginEnd="12dp" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Require Fingerprint"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_white" />
+
+            <TextView
+                android:id="@+id/tv_dialog_biometric_desc"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Touch sensor to approve login"
+                android:textSize="12sp"
+                android:textColor="@color/text_muted"
+                android:layout_marginTop="2dp" />
+        </LinearLayout>
+
+        <Switch
+            android:id="@+id/switch_dialog_biometric"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="true" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/card_border"
+        android:layout_marginTop="14dp"
+        android:layout_marginBottom="14dp" />
+
+    <!-- Info Section -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="ℹ️ Hotspot &amp; Network Switching"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:textColor="@color/accent_cyan" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="The app automatically detects when you switch to Hotspot or another Wi-Fi and reconnects to your laptop seamlessly."
+        android:textSize="11sp"
+        android:textColor="@color/text_muted"
+        android:layout_marginTop="3dp" />
+
+</LinearLayout>

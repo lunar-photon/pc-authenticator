@@ -1,0 +1,304 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg_dark"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <!-- Header -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="16dp">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🔒 PC Authenticator"
+                    android:textSize="22sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text_white" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Linux Screen Lock Multi-Device 2FA"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_muted"
+                    android:layout_marginTop="2dp" />
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/btn_settings"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:text="⚙️"
+                android:textSize="18sp"
+                android:textColor="@color/text_white"
+                android:background="@drawable/card_bg" />
+        </LinearLayout>
+
+        <!-- Active Connected Device Card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/card_bg"
+            android:padding="16dp"
+            android:layout_marginBottom="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="ACTIVE TARGET LAPTOP"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:textColor="@color/accent_cyan" />
+
+            <TextView
+                android:id="@+id/tv_hostname"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="cachyos-x8664"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_white"
+                android:layout_marginTop="4dp" />
+
+            <TextView
+                android:id="@+id/tv_active_ip"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="http://192.168.48.40:1760"
+                android:textSize="12sp"
+                android:textColor="@color/text_muted"
+                android:layout_marginTop="2dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginTop="12dp">
+
+                <TextView
+                    android:id="@+id/tv_status_dot"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="● "
+                    android:textSize="18sp"
+                    android:textColor="@color/status_green" />
+
+                <TextView
+                    android:id="@+id/tv_status_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Connected &amp; Listening"
+                    android:textSize="13sp"
+                    android:textColor="@color/text_white" />
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/btn_test_connection"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:text="⚡ Ping Current Laptop"
+                android:textSize="13sp"
+                android:textColor="@color/text_white"
+                android:background="@drawable/btn_approve"
+                android:layout_marginTop="12dp" />
+        </LinearLayout>
+
+        <!-- Active Challenge Card -->
+        <LinearLayout
+            android:id="@+id/layout_challenge"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/card_bg"
+            android:padding="20dp"
+            android:layout_marginBottom="16dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="⚠️ UNLOCK CHALLENGE ACTIVE"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="@color/accent_cyan" />
+
+            <TextView
+                android:id="@+id/tv_challenge_message"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Login requested on your laptop. Approve to unlock."
+                android:textSize="16sp"
+                android:textColor="@color/text_white"
+                android:layout_marginTop="8dp" />
+
+            <TextView
+                android:id="@+id/tv_timer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Expires in: 35s"
+                android:textSize="14sp"
+                android:textColor="@color/text_muted"
+                android:layout_marginTop="6dp" />
+
+            <Button
+                android:id="@+id/btn_approve_challenge"
+                android:layout_width="match_parent"
+                android:layout_height="54dp"
+                android:text="👆 APPROVE WITH FINGERPRINT"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_white"
+                android:background="@drawable/btn_approve"
+                android:layout_marginTop="16dp" />
+
+            <Button
+                android:id="@+id/btn_deny_challenge"
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:text="❌ DENY"
+                android:textSize="14sp"
+                android:textColor="@color/text_white"
+                android:background="@drawable/btn_deny"
+                android:layout_marginTop="10dp" />
+        </LinearLayout>
+
+        <!-- Paired Devices Management Section -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginBottom="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="10dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="PAIRED LAPTOPS &amp; PCS"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/accent_cyan" />
+
+                <TextView
+                    android:id="@+id/tv_device_count"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="1 Saved"
+                    android:textSize="11sp"
+                    android:textColor="@color/text_muted" />
+            </LinearLayout>
+
+            <!-- Buttons: Auto Scan & Add Manually -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginBottom="12dp">
+
+                <Button
+                    android:id="@+id/btn_scan_network"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:text="🔍 Auto-Scan Wi-Fi"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_white"
+                    android:background="@drawable/card_bg"
+                    android:layout_marginEnd="6dp" />
+
+                <Button
+                    android:id="@+id/btn_add_manual"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:text="➕ Add PC Manually"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_white"
+                    android:background="@drawable/card_bg"
+                    android:layout_marginStart="6dp" />
+            </LinearLayout>
+
+            <!-- Scanning Indicator -->
+            <TextView
+                android:id="@+id/tv_scan_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Scanning local network for laptops..."
+                android:textColor="@color/accent_cyan"
+                android:textSize="12sp"
+                android:gravity="center"
+                android:padding="8dp"
+                android:visibility="gone" />
+
+            <!-- Dynamic List Container for Paired Devices -->
+            <LinearLayout
+                android:id="@+id/container_devices"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+
+        </LinearLayout>
+
+        <!-- Idle Status Card -->
+        <LinearLayout
+            android:id="@+id/layout_idle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/card_bg"
+            android:gravity="center"
+            android:padding="20dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🛡️"
+                android:textSize="32sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Ready to Authenticate"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_white"
+                android:layout_marginTop="6dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Tap 'Select' on any laptop above to switch which PC to approve. When screen locks, an approval prompt appears instantly."
+                android:textSize="12sp"
+                android:textColor="@color/text_muted"
+                android:gravity="center"
+                android:layout_marginTop="4dp" />
+        </LinearLayout>
+
+    </LinearLayout>
+</ScrollView>
