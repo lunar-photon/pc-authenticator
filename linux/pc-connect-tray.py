@@ -698,11 +698,7 @@ class PhoneInfoWindow(QWidget):
         self.btn_clip.clicked.connect(self.on_clip)
         btn_grid2.addWidget(self.btn_clip)
 
-        self.btn_cam = QPushButton("📷 PC Camera Feed")
-        self.btn_cam.clicked.connect(lambda: subprocess.Popen(["xdg-open", f"{DAEMON_URL}/camera"]))
-        btn_grid2.addWidget(self.btn_cam)
-
-        self.btn_refresh = QPushButton("🔄 Refresh")
+        self.btn_refresh = QPushButton("🔄 Refresh Status")
         self.btn_refresh.clicked.connect(self.refresh_data)
         btn_grid2.addWidget(self.btn_refresh)
         layout.addLayout(btn_grid2)
@@ -905,9 +901,6 @@ class PCConnectTrayApp:
 
         act_unring = self.menu.addAction("🛑 Stop Ringing Phone")
         act_unring.triggered.connect(lambda: post_json("/api/unring"))
-
-        act_camera = self.menu.addAction("📷 View PC Camera...")
-        act_camera.triggered.connect(lambda: subprocess.Popen(["xdg-open", f"{DAEMON_URL}/camera"]))
 
         act_lock = self.menu.addAction("🔒 Lock PC Screen")
         act_lock.triggered.connect(lambda: post_json("/api/action", {"action": "lock"}))
