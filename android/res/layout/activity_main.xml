@@ -287,17 +287,27 @@
                     android:layout_marginEnd="4dp" />
 
                 <Button
-                    android:id="@+id/btn_open_webpage"
+                    android:id="@+id/btn_camera_view"
                     android:layout_width="0dp"
                     android:layout_height="42dp"
                     android:layout_weight="1"
-                    android:text="🌐 Open Webpage"
+                    android:text="📹 PC Camera"
                     android:textSize="12sp"
                     android:textStyle="bold"
                     android:textColor="@color/text_white"
                     android:background="@drawable/card_bg"
                     android:layout_marginStart="4dp" />
             </LinearLayout>
+
+            <Button
+                android:id="@+id/btn_open_webpage"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:text="🌐 Open Webpage on PC"
+                android:textSize="12sp"
+                android:textColor="@color/text_white"
+                android:background="@drawable/card_bg"
+                android:layout_marginTop="8dp" />
         </LinearLayout>
 
         <!-- Media Player Remote Card -->

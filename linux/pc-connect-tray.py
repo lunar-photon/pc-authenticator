@@ -441,37 +441,31 @@ class LaserPointerOverlay(QWidget):
         if not isinstance(data, dict):
             return
 
-        if data.get('stop') or data.get('laser') is False:
+        if data.get('stop') or (data.get('laser') is False and 'dx' not in data):
             self.hide_overlay()
             return
-
-        if data.get('start') or data.get('laser') is True:
-            if not self.isVisible():
-                self.x_pos = 0.5
-                self.y_pos = 0.5
-                self.show_overlay()
-            self.fade_timer.start(800)
-            return
-
-        dx = float(data.get('dx', 0))
-        dy = float(data.get('dy', 0))
 
         if not self.isVisible():
             self.x_pos = 0.5
             self.y_pos = 0.5
             self.show_overlay()
 
-        screen = self.screen() or QApplication.primaryScreen()
-        ratio = 16.0 / 9.0
-        if screen and screen.size().height() > 0:
-            ratio = float(screen.size().width()) / float(screen.size().height())
-        elif self.height() > 0:
-            ratio = float(self.width()) / float(self.height())
+        if 'dx' in data or 'dy' in data:
+            dx = float(data.get('dx', 0))
+            dy = float(data.get('dy', 0))
 
-        self.x_pos = min(0.995, max(0.005, self.x_pos + dx))
-        self.y_pos = min(0.995, max(0.005, self.y_pos + dy * ratio))
-        self.update()
-        self.fade_timer.start(800)
+            screen = self.screen() or QApplication.primaryScreen()
+            ratio = 16.0 / 9.0
+            if screen and screen.size().height() > 0:
+                ratio = float(screen.size().width()) / float(screen.size().height())
+            elif self.height() > 0:
+                ratio = float(self.width()) / float(self.height())
+
+            self.x_pos = min(0.995, max(0.005, self.x_pos + dx))
+            self.y_pos = min(0.995, max(0.005, self.y_pos + dy * ratio))
+            self.update()
+
+        self.fade_timer.start(1000)
 
     def show_overlay(self):
         screen = QApplication.primaryScreen()

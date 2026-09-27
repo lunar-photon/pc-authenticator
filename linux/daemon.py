@@ -661,6 +661,52 @@ def start_udp_mouse_listener(port=1762):
     t.start()
 
 # ==========================================
+# Camera Streaming Helpers
+# ==========================================
+
+def get_camera_devices():
+    devices = []
+    v4l_dir = '/sys/class/video4linux'
+    if os.path.exists(v4l_dir):
+        for entry in sorted(os.listdir(v4l_dir)):
+            dev_path = f"/dev/{entry}"
+            if not os.path.exists(dev_path):
+                continue
+            name_file = os.path.join(v4l_dir, entry, 'name')
+            name = entry
+            if os.path.exists(name_file):
+                try:
+                    with open(name_file, 'r', encoding='utf-8') as f:
+                        name = f.read().strip()
+                except Exception:
+                    pass
+            index_file = os.path.join(v4l_dir, entry, 'index')
+            idx = 0
+            if os.path.exists(index_file):
+                try:
+                    with open(index_file, 'r') as f:
+                        idx = int(f.read().strip())
+                except Exception:
+                    pass
+            if idx == 0:
+                devices.append({"device": dev_path, "name": name})
+    if not devices and os.path.exists('/dev/video0'):
+        devices.append({"device": "/dev/video0", "name": "Default Camera"})
+    return devices
+
+def get_best_camera(preferred=''):
+    if preferred and os.path.exists(preferred):
+        return preferred
+    devices = get_camera_devices()
+    for d in devices:
+        if 'hd webcam' in d['name'].lower() or 'webcam' in d['name'].lower() or 'camera' in d['name'].lower():
+            if 'iriun' not in d['name'].lower():
+                return d['device']
+    if devices:
+        return devices[0]['device']
+    return '/dev/video1' if os.path.exists('/dev/video1') else '/dev/video0'
+
+# ==========================================
 # Auth Manager
 # ==========================================
 
@@ -1041,6 +1087,27 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 try: self.send_error(502, f"Download error: {e}")
                 except Exception: pass
+            return
+
+        # 7b. Camera Endpoints
+        elif path == '/api/camera/devices':
+            devices = get_camera_devices()
+            self.send_json({"devices": devices})
+            return
+
+        elif path == '/api/camera/snapshot':
+            device = qs.get('device', [''])[0]
+            self.handle_camera_snapshot(device)
+            return
+
+        elif path == '/api/camera/stream':
+            device = qs.get('device', [''])[0]
+            quality = qs.get('quality', ['smooth'])[0]
+            self.handle_camera_stream(device, quality)
+            return
+
+        elif path == '/camera':
+            self.handle_camera_web_page()
             return
 
         # 8. Topic Streaming / Polling (ntfy Android protocol)
@@ -1670,6 +1737,129 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
         except Exception as e:
             try: self.send_error(500, str(e))
             except Exception: pass
+
+    def handle_camera_snapshot(self, device=''):
+        cam = get_best_camera(device)
+        cmd = [
+            'ffmpeg', '-nostdin', '-loglevel', 'error', '-y',
+            '-f', 'v4l2', '-input_format', 'mjpeg',
+            '-video_size', '1280x720',
+            '-i', cam,
+            '-vframes', '1',
+            '-f', 'image2', 'pipe:1'
+        ]
+        try:
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=4)
+            if res.returncode == 0 and res.stdout:
+                self.send_response(200)
+                self.send_header('Content-Type', 'image/jpeg')
+                self.send_header('Content-Length', str(len(res.stdout)))
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Cache-Control', 'no-cache, no-store')
+                self.end_headers()
+                self.wfile.write(res.stdout)
+                return
+        except Exception:
+            pass
+        self.send_error(500, "Failed to capture camera snapshot")
+
+    def handle_camera_stream(self, device='', quality='smooth'):
+        cam = get_best_camera(device)
+        size = '1280x720' if quality == 'hd' else '640x480'
+        fps = '20' if quality == 'hd' else '30'
+
+        cmd = [
+            'ffmpeg', '-nostdin', '-loglevel', 'error',
+            '-f', 'v4l2', '-input_format', 'mjpeg',
+            '-video_size', size, '-framerate', fps,
+            '-i', cam,
+            '-c:v', 'copy',
+            '-f', 'mjpeg', 'pipe:1'
+        ]
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        except Exception as e:
+            self.send_error(500, f"Cannot access camera: {e}")
+            return
+
+        self.send_response(200)
+        self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=--frame')
+        self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+
+        buffer = b''
+        try:
+            while True:
+                chunk = proc.stdout.read(8192)
+                if not chunk:
+                    break
+                buffer += chunk
+                while True:
+                    start = buffer.find(b'\xff\xd8')
+                    if start == -1:
+                        buffer = buffer[-2:]
+                        break
+                    end = buffer.find(b'\xff\xd9', start)
+                    if end == -1:
+                        buffer = buffer[start:]
+                        break
+                    frame = buffer[start:end+2]
+                    buffer = buffer[end+2:]
+                    header = f"\r\n--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {len(frame)}\r\n\r\n".encode('ascii')
+                    self.wfile.write(header + frame)
+                    self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception:
+            pass
+        finally:
+            try:
+                proc.terminate()
+                proc.wait(timeout=1)
+            except Exception:
+                proc.kill()
+
+    def handle_camera_web_page(self):
+        html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PC Webcam Live Viewer</title>
+    <style>
+        body { margin: 0; background: #0f172a; color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; }
+        .card { background: #1e293b; border-radius: 16px; padding: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); max-width: 720px; width: 90%; text-align: center; }
+        h1 { margin-top: 0; font-size: 20px; color: #06b6d4; display: flex; align-items: center; justify-content: center; gap: 8px; }
+        .stream-container { position: relative; border-radius: 12px; overflow: hidden; background: #000; width: 100%; aspect-ratio: 4/3; display: flex; align-items: center; justify-content: center; }
+        .stream-container img { width: 100%; height: 100%; object-fit: contain; }
+        .actions { margin-top: 16px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+        button, a.btn { background: #0ea5e9; color: white; border: none; padding: 10px 18px; border-radius: 8px; font-weight: bold; cursor: pointer; text-decoration: none; font-size: 14px; transition: background 0.2s; }
+        button:hover, a.btn:hover { background: #0284c7; }
+        .btn-green { background: #10b981; }
+        .btn-green:hover { background: #059669; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>📹 PC Camera Live Feed</h1>
+        <div class="stream-container">
+            <img src="/api/camera/stream" alt="Live Camera Feed">
+        </div>
+        <div class="actions">
+            <a class="btn btn-green" href="/api/camera/snapshot" target="_blank" download="snapshot.jpg">📸 Save Snapshot</a>
+            <button onclick="location.reload()">🔄 Reconnect</button>
+            <a class="btn" href="/browse">📁 File Explorer</a>
+        </div>
+    </div>
+</body>
+</html>"""
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', str(len(html.encode('utf-8'))))
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(html.encode('utf-8'))
 
     def read_json(self):
         try:
