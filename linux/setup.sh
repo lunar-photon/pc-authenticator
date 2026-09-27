@@ -61,17 +61,35 @@ RestartSec=3
 [Install]
 WantedBy=default.target
 EOF
+        cat <<EOF > "$SERVICE_DIR/pc-connect-tray.service"
+[Unit]
+Description=PC Connect System Tray & Laser Pointer Overlay
+After=network.target pc-authenticator.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 $TARGET_HOME/.local/bin/pc-connect-tray
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
+EOF
         chown -R "$TARGET_USER:$TARGET_USER" "$SERVICE_DIR"
         
-        # Enable & start user service
+        # Enable & start user services
         sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$TARGET_UID" systemctl --user daemon-reload >/dev/null 2>&1 || true
-        sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$TARGET_UID" systemctl --user enable pc-authenticator.service >/dev/null 2>&1 || true
-        sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$TARGET_UID" systemctl --user restart pc-authenticator.service >/dev/null 2>&1 || true
+        sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$TARGET_UID" systemctl --user enable pc-authenticator.service pc-connect-tray.service >/dev/null 2>&1 || true
+        sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$TARGET_UID" systemctl --user restart pc-authenticator.service pc-connect-tray.service >/dev/null 2>&1 || true
         
         if sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$TARGET_UID" systemctl --user is-active --quiet pc-authenticator.service; then
-            echo -e "${GREEN}[✓] Background service (pc-authenticator.service) is active.${NC}"
+            echo -e "${GREEN}[✓] Background daemon (pc-authenticator.service) is active.${NC}"
+        fi
+        if sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$TARGET_UID" systemctl --user is-active --quiet pc-connect-tray.service; then
+            echo -e "${GREEN}[✓] System tray service (pc-connect-tray.service) is active.${NC}"
         else
-            echo -e "${YELLOW}[!] User service enabled. (Will start on next login if not active in current session).${NC}"
+            echo -e "${YELLOW}[!] User services enabled. (Will start on next login if not active in current session).${NC}"
         fi
         
         # Also install global command symlinks ~/.local/bin/pc-auth, pc-connect, pc-connect-send, pc-connect-tray
@@ -283,13 +301,18 @@ show_status() {
     print_banner
     echo -e "${BOLD}System & Authentication Status:${NC}\n"
 
-    # 1. Daemon service
+    # 1. Daemon & Tray services
     if [ -n "$TARGET_USER" ] && [ "$TARGET_USER" != "root" ]; then
         TARGET_UID=$(id -u "$TARGET_USER")
         if sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$TARGET_UID" systemctl --user is-active --quiet pc-authenticator.service; then
             echo -e " • Daemon Service:     ${GREEN}● Active (Running)${NC}"
         else
             echo -e " • Daemon Service:     ${RED}● Inactive (Stopped)${NC}"
+        fi
+        if sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$TARGET_UID" systemctl --user is-active --quiet pc-connect-tray.service; then
+            echo -e " • Tray & Overlay:     ${GREEN}● Active (Running in background)${NC}"
+        else
+            echo -e " • Tray & Overlay:     ${RED}● Inactive (Stopped)${NC}"
         fi
     fi
 
