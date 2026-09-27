@@ -7,6 +7,8 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.media.MediaScannerConnection;
 import android.net.Uri;
 import android.os.Build;
@@ -473,8 +475,9 @@ public class FileServer {
 
         // Notify MediaStore so Gallery / Files apps see it immediately
         final File finalFile = destFile;
+        String mimeType = PCFileProvider.getMimeType(destFile.getAbsolutePath());
         try {
-            MediaScannerConnection.scanFile(context, new String[]{destFile.getAbsolutePath()}, null, null);
+            MediaScannerConnection.scanFile(context, new String[]{destFile.getAbsolutePath()}, new String[]{mimeType}, null);
         } catch (Exception ignored) {}
 
         // Show system notification
@@ -570,15 +573,20 @@ public class FileServer {
             NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm == null) return;
 
+            String mimeType = PCFileProvider.getMimeType(file.getAbsolutePath());
+            Uri fileUri = PCFileProvider.getUriForFile(context, file);
+
             Intent viewIntent = new Intent(Intent.ACTION_VIEW);
-            Uri fileUri = getContentUriForPath(context, file.getAbsolutePath());
-            if (fileUri != null) {
-                viewIntent.setDataAndType(fileUri, "*/*");
-                viewIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            } else {
-                viewIntent = new Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS);
-            }
+            viewIntent.setDataAndType(fileUri, mimeType);
+            viewIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             viewIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+            try {
+                List<ResolveInfo> resInfoList = context.getPackageManager().queryIntentActivities(viewIntent, PackageManager.MATCH_DEFAULT_ONLY);
+                for (ResolveInfo resolveInfo : resInfoList) {
+                    context.grantUriPermission(resolveInfo.activityInfo.packageName, fileUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                }
+            } catch (Exception ignored) {}
 
             PendingIntent pi = PendingIntent.getActivity(
                     context, (int) System.currentTimeMillis(), viewIntent,
@@ -592,8 +600,19 @@ public class FileServer {
                 builder = new android.app.Notification.Builder(context);
             }
 
-            builder.setContentTitle("📁 File Received from PC")
-                    .setContentText(file.getName() + " (" + Math.max(1, file.length() / 1024) + " KB)")
+            String typeLabel = "File";
+            if (mimeType.startsWith("image/")) typeLabel = "Image";
+            else if (mimeType.startsWith("video/")) typeLabel = "Video";
+            else if (mimeType.startsWith("audio/")) typeLabel = "Audio";
+            else if (mimeType.equals("application/pdf")) typeLabel = "PDF Document";
+            else if (mimeType.contains("word") || mimeType.contains("document")) typeLabel = "Document";
+            else if (mimeType.contains("excel") || mimeType.contains("sheet")) typeLabel = "Spreadsheet";
+            else if (mimeType.contains("package-archive")) typeLabel = "Android App (APK)";
+            else if (mimeType.contains("zip") || mimeType.contains("compressed") || mimeType.contains("tar")) typeLabel = "Archive";
+
+            builder.setContentTitle("📁 " + typeLabel + " Received from PC")
+                    .setContentText(file.getName() + " (" + formatFileSize(file.length()) + ")")
+                    .setSubText(typeLabel)
                     .setSmallIcon(R.mipmap.ic_launcher)
                     .setAutoCancel(true)
                     .setContentIntent(pi);
@@ -604,10 +623,18 @@ public class FileServer {
             }
 
             nm.notify((int) (NOTIF_BASE_ID + (System.currentTimeMillis() % 1000)), builder.build());
-            Log.i(TAG, "Notification posted for received file: " + file.getName());
+            Log.i(TAG, "Notification posted for received file: " + file.getName() + " (" + mimeType + ")");
         } catch (Throwable t) {
             Log.e(TAG, "Error posting file notification: " + t.getMessage(), t);
         }
+    }
+
+    public static String formatFileSize(long bytes) {
+        if (bytes <= 0) return "0 B";
+        final String[] units = new String[]{"B", "KB", "MB", "GB", "TB"};
+        int digitGroups = (int) (Math.log10(bytes) / Math.log10(1024));
+        digitGroups = Math.min(digitGroups, units.length - 1);
+        return String.format(java.util.Locale.US, "%.1f %s", bytes / Math.pow(1024, digitGroups), units[digitGroups]);
     }
 
     private void sendOptions(OutputStream out) throws Exception {

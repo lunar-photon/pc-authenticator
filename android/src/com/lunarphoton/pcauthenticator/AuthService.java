@@ -45,6 +45,8 @@ import android.telephony.TelephonyManager;
 import android.telephony.TelephonyCallback;
 import android.telephony.PhoneStateListener;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import android.os.StatFs;
 
 public class AuthService extends Service {
     private static final String TAG = "PCAuthService";
@@ -100,6 +102,29 @@ public class AuthService extends Service {
                 }
             }
         }, unlockFilter);
+
+        // Automatic battery & charging status reporting
+        IntentFilter batteryFilter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
+        registerReceiver(new BroadcastReceiver() {
+            private int lastReportedLevel = -1;
+            private boolean lastReportedCharging = false;
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                int rawLevel = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+                int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
+                int status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
+                boolean isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL;
+                int level = (rawLevel >= 0 && scale > 0) ? (rawLevel * 100) / scale : -1;
+                if (level != lastReportedLevel || isCharging != lastReportedCharging) {
+                    lastReportedLevel = level;
+                    lastReportedCharging = isCharging;
+                    PairedDevice active = DeviceManager.getActiveDevice(AuthService.this);
+                    if (active != null) {
+                        sendPhoneStatusToPc(active);
+                    }
+                }
+            }
+        }, batteryFilter);
 
         startUdpBeaconListener();
         initTelephonyListener();
@@ -550,10 +575,32 @@ public class AuthService extends Service {
                                  status == BatteryManager.BATTERY_STATUS_FULL;
                 }
 
+                // Storage stats
+                long storageFree = 0;
+                long storageTotal = 0;
+                try {
+                    File extDir = Environment.getExternalStorageDirectory();
+                    StatFs stat = new StatFs(extDir.getPath());
+                    long blockSize = stat.getBlockSizeLong();
+                    storageFree = stat.getAvailableBlocksLong() * blockSize;
+                    storageTotal = stat.getBlockCountLong() * blockSize;
+                } catch (Exception ignored) {}
+
                 JSONObject body = new JSONObject();
                 if (level >= 0) body.put("battery", level);
                 body.put("charging", isCharging);
                 body.put("port", FileServer.PORT);
+
+                String manufacturer = Build.MANUFACTURER != null ? Build.MANUFACTURER : "";
+                String model = Build.MODEL != null ? Build.MODEL : "Android";
+                String fullName = model.toLowerCase().startsWith(manufacturer.toLowerCase()) ? model : (manufacturer + " " + model);
+                body.put("device_name", fullName.trim());
+                body.put("model", model);
+                body.put("manufacturer", manufacturer);
+                body.put("android_version", Build.VERSION.RELEASE);
+                body.put("sdk_int", Build.VERSION.SDK_INT);
+                body.put("storage_free", storageFree);
+                body.put("storage_total", storageTotal);
 
                 HttpURLConnection conn = (HttpURLConnection) new URL(active.getBaseUrl() + "/api/phone/status").openConnection();
                 conn.setRequestMethod("POST");
@@ -608,6 +655,8 @@ public class AuthService extends Service {
                     c++;
                 }
 
+                String mimeType = PCFileProvider.getMimeType(dest.getName());
+
                 HttpURLConnection conn = (HttpURLConnection) new URL(downloadUrl).openConnection();
                 conn.setConnectTimeout(10000);
                 conn.setReadTimeout(60000);
@@ -621,7 +670,7 @@ public class AuthService extends Service {
                         try {
                             ContentValues values = new ContentValues();
                             values.put(MediaStore.MediaColumns.DISPLAY_NAME, dest.getName());
-                            values.put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream");
+                            values.put(MediaStore.MediaColumns.MIME_TYPE, mimeType);
                             values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
                             Uri insertedUri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
                             if (insertedUri != null) {
@@ -643,9 +692,11 @@ public class AuthService extends Service {
                         }
                         outStream.flush();
                     }
+
                     try {
-                        MediaScannerConnection.scanFile(this, new String[]{dest.getAbsolutePath()}, null, null);
+                        MediaScannerConnection.scanFile(this, new String[]{dest.getAbsolutePath()}, new String[]{mimeType}, null);
                     } catch (Exception ignored) {}
+
                     showFileNotification(dest);
                 }
             } catch (Exception e) {
@@ -659,15 +710,20 @@ public class AuthService extends Service {
             NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm == null) return;
 
+            String mimeType = PCFileProvider.getMimeType(file.getAbsolutePath());
+            Uri fileUri = PCFileProvider.getUriForFile(this, file);
+
             Intent viewIntent = new Intent(Intent.ACTION_VIEW);
-            Uri fileUri = FileServer.getContentUriForPath(this, file.getAbsolutePath());
-            if (fileUri != null) {
-                viewIntent.setDataAndType(fileUri, "*/*");
-                viewIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            } else {
-                viewIntent = new Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS);
-            }
+            viewIntent.setDataAndType(fileUri, mimeType);
+            viewIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             viewIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+            try {
+                List<ResolveInfo> resInfoList = getPackageManager().queryIntentActivities(viewIntent, PackageManager.MATCH_DEFAULT_ONLY);
+                for (ResolveInfo resolveInfo : resInfoList) {
+                    grantUriPermission(resolveInfo.activityInfo.packageName, fileUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                }
+            } catch (Exception ignored) {}
 
             PendingIntent pi = PendingIntent.getActivity(
                     this, (int) System.currentTimeMillis(), viewIntent,
@@ -681,8 +737,19 @@ public class AuthService extends Service {
                 builder = new Notification.Builder(this);
             }
 
-            builder.setContentTitle("📁 File Received from PC")
-                    .setContentText(file.getName() + " (" + Math.max(1, file.length() / 1024) + " KB)")
+            String typeLabel = "File";
+            if (mimeType.startsWith("image/")) typeLabel = "Image";
+            else if (mimeType.startsWith("video/")) typeLabel = "Video";
+            else if (mimeType.startsWith("audio/")) typeLabel = "Audio";
+            else if (mimeType.equals("application/pdf")) typeLabel = "PDF Document";
+            else if (mimeType.contains("word") || mimeType.contains("document")) typeLabel = "Document";
+            else if (mimeType.contains("excel") || mimeType.contains("sheet")) typeLabel = "Spreadsheet";
+            else if (mimeType.contains("package-archive")) typeLabel = "Android App (APK)";
+            else if (mimeType.contains("zip") || mimeType.contains("compressed") || mimeType.contains("tar")) typeLabel = "Archive";
+
+            builder.setContentTitle("📁 " + typeLabel + " Received from PC")
+                    .setContentText(file.getName() + " (" + formatFileSize(file.length()) + ")")
+                    .setSubText(typeLabel)
                     .setSmallIcon(R.mipmap.ic_launcher)
                     .setAutoCancel(true)
                     .setContentIntent(pi);
@@ -693,10 +760,18 @@ public class AuthService extends Service {
             }
 
             nm.notify((int) (FileServer.NOTIF_BASE_ID + (System.currentTimeMillis() % 1000)), builder.build());
-            Log.i(TAG, "Notification posted for incoming file: " + file.getName());
+            Log.i(TAG, "Notification posted for incoming file: " + file.getName() + " (" + mimeType + ")");
         } catch (Throwable t) {
             Log.e(TAG, "Error posting file notification: " + t.getMessage(), t);
         }
+    }
+
+    public static String formatFileSize(long bytes) {
+        if (bytes <= 0) return "0 B";
+        final String[] units = new String[]{"B", "KB", "MB", "GB", "TB"};
+        int digitGroups = (int) (Math.log10(bytes) / Math.log10(1024));
+        digitGroups = Math.min(digitGroups, units.length - 1);
+        return String.format(java.util.Locale.US, "%.1f %s", bytes / Math.pow(1024, digitGroups), units[digitGroups]);
     }
 
     private void initTelephonyListener() {

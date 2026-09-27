@@ -103,5 +103,11 @@
             </intent-filter>
         </receiver>
 
+        <provider
+            android:name=".PCFileProvider"
+            android:authorities="com.lunarphoton.pcauthenticator.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
     </application>
 </manifest>

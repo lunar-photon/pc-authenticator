@@ -43,7 +43,12 @@ active_phone_state = {
     "battery_level": None,
     "is_charging": False,
     "last_seen": 0,
-    "auth_token": None
+    "auth_token": None,
+    "model": None,
+    "manufacturer": None,
+    "android_version": None,
+    "storage_free": None,
+    "storage_total": None
 }
 
 staged_files = {}  # token -> {"filepath": ..., "filename": ..., "size": ..., "created_at": ...}
@@ -1393,6 +1398,18 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
                 active_phone_state['is_charging'] = bool(body.get('charging'))
             if 'port' in body:
                 active_phone_state['port'] = int(body.get('port'))
+            if 'device_name' in body:
+                active_phone_state['client_name'] = body.get('device_name')
+            if 'model' in body:
+                active_phone_state['model'] = body.get('model')
+            if 'manufacturer' in body:
+                active_phone_state['manufacturer'] = body.get('manufacturer')
+            if 'android_version' in body:
+                active_phone_state['android_version'] = body.get('android_version')
+            if 'storage_free' in body:
+                active_phone_state['storage_free'] = body.get('storage_free')
+            if 'storage_total' in body:
+                active_phone_state['storage_total'] = body.get('storage_total')
             active_phone_state['ip'] = self.client_address[0]
             active_phone_state['last_seen'] = time.time()
             self.send_json({"status": "ok"})

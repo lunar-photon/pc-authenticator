@@ -526,6 +526,301 @@ class LaserListenerThread(QThread):
             pass
 
 # ==========================================
+# Phone Status & Info Window (KDE Connect style)
+# ==========================================
+
+class PhoneInfoWindow(QWidget):
+    def __init__(self, parent_tray=None):
+        super().__init__()
+        self.parent_tray = parent_tray
+        self.setWindowTitle("PC Connect - Device Status")
+        self.setWindowIcon(QIcon.fromTheme("smartphone", QIcon.fromTheme("phone")))
+        self.resize(460, 520)
+        self.is_ringing = False
+
+        self.setup_ui()
+        self.refresh_data()
+
+        # Auto-refresh while open
+        self.poll_timer = QTimer(self)
+        self.poll_timer.timeout.connect(self.refresh_data)
+        self.poll_timer.start(3000)
+
+    def setup_ui(self):
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #1e222d;
+                color: #eceff4;
+                font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            }
+            QPushButton {
+                background-color: #3b4252;
+                color: #eceff4;
+                border: 1px solid #434c5e;
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-weight: 500;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #434c5e;
+                border-color: #88c0d0;
+            }
+            QPushButton:pressed {
+                background-color: #4c566a;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(14)
+
+        # 1. Device Header Card
+        header_card = QWidget()
+        header_card.setStyleSheet("background-color: #242933; border: 1px solid #3b4252; border-radius: 10px;")
+        h_layout = QHBoxLayout(header_card)
+        h_layout.setContentsMargins(14, 12, 14, 12)
+
+        icon_lbl = QLabel("📱")
+        icon_lbl.setStyleSheet("font-size: 34px; background: transparent; border: none;")
+        h_layout.addWidget(icon_lbl)
+
+        title_vbox = QVBoxLayout()
+        title_vbox.setSpacing(2)
+        self.device_name_lbl = QLabel("Android Phone")
+        self.device_name_lbl.setStyleSheet("font-size: 17px; font-weight: bold; color: #eceff4; background: transparent; border: none;")
+        self.device_sub_lbl = QLabel("Checking connection...")
+        self.device_sub_lbl.setStyleSheet("font-size: 12px; color: #88c0d0; background: transparent; border: none;")
+        title_vbox.addWidget(self.device_name_lbl)
+        title_vbox.addWidget(self.device_sub_lbl)
+        h_layout.addLayout(title_vbox)
+        h_layout.addStretch()
+
+        self.status_badge = QLabel("Connected")
+        self.status_badge.setStyleSheet("background-color: #2e4338; color: #a3be8c; border: 1px solid #3e684a; border-radius: 12px; padding: 4px 10px; font-weight: bold; font-size: 11px;")
+        h_layout.addWidget(self.status_badge)
+        layout.addWidget(header_card)
+
+        # 2. Battery & Hardware Card
+        metrics_card = QWidget()
+        metrics_card.setStyleSheet("background-color: #242933; border: 1px solid #3b4252; border-radius: 10px;")
+        m_layout = QVBoxLayout(metrics_card)
+        m_layout.setContentsMargins(16, 14, 16, 14)
+        m_layout.setSpacing(12)
+
+        # Battery
+        bat_header = QHBoxLayout()
+        self.bat_label = QLabel("🔋 Battery Level")
+        self.bat_label.setStyleSheet("font-weight: bold; color: #eceff4; font-size: 13px; background: transparent; border: none;")
+        self.bat_val = QLabel("--%")
+        self.bat_val.setStyleSheet("color: #88c0d0; font-weight: bold; font-size: 13px; background: transparent; border: none;")
+        bat_header.addWidget(self.bat_label)
+        bat_header.addStretch()
+        bat_header.addWidget(self.bat_val)
+        m_layout.addLayout(bat_header)
+
+        self.bat_bar = QProgressBar()
+        self.bat_bar.setRange(0, 100)
+        self.bat_bar.setValue(0)
+        self.bat_bar.setTextVisible(True)
+        self.bat_bar.setFixedHeight(22)
+        m_layout.addWidget(self.bat_bar)
+
+        # Storage
+        storage_header = QHBoxLayout()
+        self.storage_label = QLabel("💾 Internal Storage")
+        self.storage_label.setStyleSheet("font-weight: bold; color: #eceff4; font-size: 13px; background: transparent; border: none;")
+        self.storage_val = QLabel("--")
+        self.storage_val.setStyleSheet("color: #88c0d0; font-size: 12px; background: transparent; border: none;")
+        storage_header.addWidget(self.storage_label)
+        storage_header.addStretch()
+        storage_header.addWidget(self.storage_val)
+        m_layout.addLayout(storage_header)
+
+        self.storage_bar = QProgressBar()
+        self.storage_bar.setRange(0, 100)
+        self.storage_bar.setValue(0)
+        self.storage_bar.setTextVisible(True)
+        self.storage_bar.setFixedHeight(22)
+        self.storage_bar.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #3b4252;
+                border-radius: 6px;
+                text-align: center;
+                background-color: #2e3440;
+                color: #eceff4;
+                font-weight: bold;
+            }
+            QProgressBar::chunk {
+                background-color: #81a1c1;
+                border-radius: 5px;
+            }
+        """)
+        m_layout.addWidget(self.storage_bar)
+
+        # Network details
+        self.ip_detail = QLabel("🌐 IP: Waiting for connection...")
+        self.ip_detail.setStyleSheet("color: #d8dee9; font-size: 12px; background: transparent; border: none; padding-top: 4px;")
+        m_layout.addWidget(self.ip_detail)
+
+        self.sync_detail = QLabel("🔄 Status: Polling...")
+        self.sync_detail.setStyleSheet("color: #d8dee9; font-size: 12px; background: transparent; border: none;")
+        m_layout.addWidget(self.sync_detail)
+
+        layout.addWidget(metrics_card)
+
+        # 3. Quick Actions
+        actions_label = QLabel("⚡ QUICK ACTIONS")
+        actions_label.setStyleSheet("font-size: 11px; font-weight: bold; color: #88c0d0; padding-left: 2px;")
+        layout.addWidget(actions_label)
+
+        btn_grid1 = QHBoxLayout()
+        btn_grid1.setSpacing(8)
+
+        self.btn_browse = QPushButton("📂 Browse Files")
+        self.btn_browse.setStyleSheet("background-color: #88c0d0; color: #1e222d; font-weight: bold; border-radius: 6px; padding: 9px;")
+        self.btn_browse.clicked.connect(self.on_browse)
+        btn_grid1.addWidget(self.btn_browse)
+
+        self.btn_send = QPushButton("📤 Send File")
+        self.btn_send.clicked.connect(self.on_send)
+        btn_grid1.addWidget(self.btn_send)
+
+        self.btn_ring = QPushButton("🔔 Ring Phone")
+        self.btn_ring.clicked.connect(self.toggle_ring)
+        btn_grid1.addWidget(self.btn_ring)
+        layout.addLayout(btn_grid1)
+
+        btn_grid2 = QHBoxLayout()
+        btn_grid2.setSpacing(8)
+
+        self.btn_clip = QPushButton("📋 Sync Clipboard")
+        self.btn_clip.clicked.connect(self.on_clip)
+        btn_grid2.addWidget(self.btn_clip)
+
+        self.btn_cam = QPushButton("📷 PC Camera Feed")
+        self.btn_cam.clicked.connect(lambda: subprocess.Popen(["xdg-open", f"{DAEMON_URL}/camera"]))
+        btn_grid2.addWidget(self.btn_cam)
+
+        self.btn_refresh = QPushButton("🔄 Refresh")
+        self.btn_refresh.clicked.connect(self.refresh_data)
+        btn_grid2.addWidget(self.btn_refresh)
+        layout.addLayout(btn_grid2)
+
+        layout.addStretch()
+
+    def refresh_data(self):
+        st = fetch_json("/api/phone/status")
+        if not isinstance(st, dict) or "phone" not in st:
+            self.status_badge.setText("Daemon Offline")
+            self.status_badge.setStyleSheet("background-color: #4c1d24; color: #ff8080; border: 1px solid #73232c; border-radius: 12px; padding: 4px 10px; font-weight: bold; font-size: 11px;")
+            self.device_sub_lbl.setText("PC Authenticator daemon is not responding")
+            return
+
+        phone = st["phone"]
+        connected = st.get("connected", False)
+        name = phone.get("client_name", "Android Device")
+        model = phone.get("model") or ""
+        android_ver = phone.get("android_version") or ""
+        sub_info = []
+        if android_ver:
+            sub_info.append(f"Android {android_ver}")
+        if model and model.lower() not in name.lower():
+            sub_info.append(f"Model: {model}")
+        if not sub_info:
+            sub_info.append("Paired Phone")
+
+        self.device_name_lbl.setText(name)
+        self.device_sub_lbl.setText(" • ".join(sub_info))
+
+        if connected:
+            self.status_badge.setText("🟢 Connected")
+            self.status_badge.setStyleSheet("background-color: #2e4338; color: #a3be8c; border: 1px solid #3e684a; border-radius: 12px; padding: 4px 10px; font-weight: bold; font-size: 11px;")
+        else:
+            self.status_badge.setText("⚪ Idle / Offline")
+            self.status_badge.setStyleSheet("background-color: #3b4252; color: #d8dee9; border: 1px solid #4c566a; border-radius: 12px; padding: 4px 10px; font-weight: bold; font-size: 11px;")
+
+        # Battery
+        bat = phone.get("battery_level")
+        charging = phone.get("is_charging", False)
+        if bat is not None:
+            self.bat_bar.setValue(int(bat))
+            self.bat_val.setText(f"{bat}%{' (Charging ⚡)' if charging else ' (Discharging)'}")
+            chunk_color = "#88c0d0" if charging else ("#a3be8c" if bat > 30 else ("#ebcb8b" if bat > 15 else "#bf616a"))
+            self.bat_bar.setStyleSheet(f"""
+                QProgressBar {{
+                    border: 1px solid #3b4252;
+                    border-radius: 6px;
+                    text-align: center;
+                    background-color: #2e3440;
+                    color: #eceff4;
+                    font-weight: bold;
+                }}
+                QProgressBar::chunk {{
+                    background-color: {chunk_color};
+                    border-radius: 5px;
+                }}
+            """)
+        else:
+            self.bat_val.setText("Not reported")
+            self.bat_bar.setValue(0)
+
+        # Storage
+        storage_free = phone.get("storage_free")
+        storage_total = phone.get("storage_total")
+        if storage_total and storage_total > 0:
+            free_gb = storage_free / (1024**3)
+            total_gb = storage_total / (1024**3)
+            used_pct = int(((storage_total - storage_free) / storage_total) * 100)
+            self.storage_val.setText(f"{free_gb:.1f} GB Free / {total_gb:.1f} GB Total")
+            self.storage_bar.setValue(used_pct)
+            self.storage_bar.setVisible(True)
+            self.storage_label.setVisible(True)
+            self.storage_val.setVisible(True)
+        else:
+            self.storage_bar.setVisible(False)
+            self.storage_label.setVisible(False)
+            self.storage_val.setVisible(False)
+
+        # Network details
+        ip = phone.get("ip") or "Searching..."
+        port = phone.get("port", 1761)
+        self.ip_detail.setText(f"🌐 Phone IP: {ip}:{port}")
+        last_seen = phone.get("last_seen", 0)
+        diff = int(time.time() - last_seen) if last_seen else -1
+        if diff >= 0 and diff < 60:
+            seen_str = f"{diff}s ago"
+        elif diff >= 60:
+            seen_str = f"{diff // 60}m ago"
+        else:
+            seen_str = "Never"
+        self.sync_detail.setText(f"🕒 Last Active: {seen_str} • 🔐 Encryption: HMAC-SHA256")
+
+    def on_browse(self):
+        if self.parent_tray:
+            self.parent_tray.open_explorer()
+
+    def on_send(self):
+        if self.parent_tray:
+            self.parent_tray.send_file_dialog()
+
+    def on_clip(self):
+        if self.parent_tray:
+            self.parent_tray.sync_clipboard()
+
+    def toggle_ring(self):
+        if not self.is_ringing:
+            post_json("/api/ring")
+            self.btn_ring.setText("🛑 Stop Ringing")
+            self.btn_ring.setStyleSheet("background-color: #bf616a; color: #eceff4; font-weight: bold; border-radius: 6px; padding: 9px;")
+            self.is_ringing = True
+        else:
+            post_json("/api/unring")
+            self.btn_ring.setText("🔔 Ring Phone")
+            self.btn_ring.setStyleSheet("background-color: #3b4252; color: #eceff4; border-radius: 6px; padding: 9px;")
+            self.is_ringing = False
+
+# ==========================================
 # System Tray Application
 # ==========================================
 
@@ -539,7 +834,11 @@ class PCConnectTrayApp:
         self.tray.setIcon(QIcon.fromTheme("smartphone", QIcon.fromTheme("phone")))
         self.tray.setVisible(True)
 
+        self.info_window = None
         self.explorer_window = None
+
+        # Left-click on tray icon opens Phone Info
+        self.tray.activated.connect(self.on_tray_activated)
 
         # Laser pointer overlay listener
         self.laser_overlay = LaserPointerOverlay()
@@ -557,11 +856,38 @@ class PCConnectTrayApp:
         self.timer.start(4000)
         self.update_status()
 
+    def on_tray_activated(self, reason):
+        if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
+            self.show_phone_info()
+
+    def show_phone_info(self):
+        if not self.info_window:
+            self.info_window = PhoneInfoWindow(self)
+        self.info_window.refresh_data()
+        self.info_window.show()
+        self.info_window.raise_()
+        self.info_window.activateWindow()
+
     def build_menu(self):
         self.menu.clear()
 
-        self.act_status = self.menu.addAction("📱 Checking Phone Status...")
-        self.act_status.setEnabled(False)
+        # Phone Header in Menu
+        self.act_status_header = self.menu.addAction("📱 Android Phone")
+        self.act_status_header.triggered.connect(self.show_phone_info)
+
+        self.act_status_bat = self.menu.addAction("🔋 Battery: --%")
+        self.act_status_bat.triggered.connect(self.show_phone_info)
+
+        self.act_status_ip = self.menu.addAction("🌐 IP: --")
+        self.act_status_ip.triggered.connect(self.show_phone_info)
+
+        self.act_status_conn = self.menu.addAction("📶 Checking Status...")
+        self.act_status_conn.triggered.connect(self.show_phone_info)
+
+        self.menu.addSeparator()
+
+        act_view_info = self.menu.addAction("📱 View Phone Details & Status...")
+        act_view_info.triggered.connect(self.show_phone_info)
 
         self.menu.addSeparator()
 
@@ -579,6 +905,9 @@ class PCConnectTrayApp:
 
         act_unring = self.menu.addAction("🛑 Stop Ringing Phone")
         act_unring.triggered.connect(lambda: post_json("/api/unring"))
+
+        act_camera = self.menu.addAction("📷 View PC Camera...")
+        act_camera.triggered.connect(lambda: subprocess.Popen(["xdg-open", f"{DAEMON_URL}/camera"]))
 
         act_lock = self.menu.addAction("🔒 Lock PC Screen")
         act_lock.triggered.connect(lambda: post_json("/api/action", {"action": "lock"}))
@@ -604,13 +933,26 @@ class PCConnectTrayApp:
             name = phone.get("client_name", "Android Phone")
             bat = phone.get("battery_level")
             charging = phone.get("is_charging", False)
+            ip = phone.get("ip") or "Searching..."
 
             bat_str = f" • {bat}%{' ⚡' if charging else ''}" if bat is not None else ""
             status_text = f"🟢 {name}{bat_str}" if connected else f"⚪ {name} (Idle)"
-            self.act_status.setText(status_text)
-            self.tray.setToolTip(f"PC Connect: {status_text}")
+
+            self.act_status_header.setText(f"📱 {name}")
+            self.act_status_conn.setText(f"📶 {'Connected' if connected else 'Disconnected'}")
+            if bat is not None:
+                self.act_status_bat.setText(f"🔋 Battery: {bat}%{' (Charging ⚡)' if charging else ''}")
+                self.act_status_bat.setVisible(True)
+            else:
+                self.act_status_bat.setVisible(False)
+            self.act_status_ip.setText(f"🌐 IP: {ip}")
+
+            self.tray.setToolTip(f"PC Connect: {status_text}\nClick icon to view phone details")
         else:
-            self.act_status.setText("⚠️ Daemon Offline")
+            self.act_status_header.setText("⚠️ Daemon Offline")
+            self.act_status_conn.setText("📶 Disconnected")
+            self.act_status_bat.setVisible(False)
+            self.act_status_ip.setText("🌐 IP: 127.0.0.1")
             self.tray.setToolTip("PC Connect: Daemon Offline")
 
     def open_explorer(self):
