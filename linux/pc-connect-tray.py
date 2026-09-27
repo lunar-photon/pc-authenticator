@@ -421,62 +421,99 @@ class LaserPointerOverlay(QWidget):
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.SubWindow |
+            Qt.WindowType.WindowDoesNotAcceptFocus |
+            Qt.WindowType.Tool |
             Qt.WindowType.WindowTransparentForInput
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.setFixedSize(54, 54)
-        self.hide()
+
+        self.x_pos = 0.5
+        self.y_pos = 0.5
 
         self.fade_timer = QTimer(self)
         self.fade_timer.setSingleShot(True)
+        self.fade_timer.setInterval(800)
         self.fade_timer.timeout.connect(self.hide_overlay)
 
-        self.track_timer = QTimer(self)
-        self.track_timer.setInterval(16)  # ~60 fps
-        self.track_timer.timeout.connect(self.update_position)
+    def handle_packet(self, data):
+        if not isinstance(data, dict):
+            return
 
-    def trigger(self, active=True):
-        if active:
-            self.update_position()
-            self.show()
-            self.raise_()
-            if not self.track_timer.isActive():
-                self.track_timer.start()
-            self.fade_timer.start(1200)
-        else:
+        if data.get('stop') or data.get('laser') is False:
             self.hide_overlay()
+            return
+
+        if data.get('start') or data.get('laser') is True:
+            if not self.isVisible():
+                self.x_pos = 0.5
+                self.y_pos = 0.5
+                self.show_overlay()
+            self.fade_timer.start(800)
+            return
+
+        dx = float(data.get('dx', 0))
+        dy = float(data.get('dy', 0))
+
+        if not self.isVisible():
+            self.x_pos = 0.5
+            self.y_pos = 0.5
+            self.show_overlay()
+
+        screen = self.screen() or QApplication.primaryScreen()
+        ratio = 16.0 / 9.0
+        if screen and screen.size().height() > 0:
+            ratio = float(screen.size().width()) / float(screen.size().height())
+        elif self.height() > 0:
+            ratio = float(self.width()) / float(self.height())
+
+        self.x_pos = min(0.995, max(0.005, self.x_pos + dx))
+        self.y_pos = min(0.995, max(0.005, self.y_pos + dy * ratio))
+        self.update()
+        self.fade_timer.start(800)
+
+    def show_overlay(self):
+        screen = QApplication.primaryScreen()
+        if screen:
+            self.setGeometry(screen.geometry())
+        self.showFullScreen()
+        self.raise_()
+        self.update()
 
     def hide_overlay(self):
-        self.track_timer.stop()
+        self.fade_timer.stop()
         self.hide()
-
-    def update_position(self):
-        pos = QCursor.pos()
-        self.move(pos.x() - 27, pos.y() - 27)
 
     def paintEvent(self, event):
         from PyQt6.QtGui import QPainter, QRadialGradient, QColor
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Draw glowing red laser dot with white core
-        grad = QRadialGradient(27, 27, 26)
-        grad.setColorAt(0.0, QColor(255, 255, 255, 255))      # White-hot core
-        grad.setColorAt(0.18, QColor(255, 255, 255, 240))
-        grad.setColorAt(0.3, QColor(255, 23, 68, 255))        # Intense neon red
-        grad.setColorAt(0.55, QColor(255, 23, 68, 160))       # Red halo
-        grad.setColorAt(0.82, QColor(255, 0, 0, 60))          # Outer glow
-        grad.setColorAt(1.0, QColor(255, 0, 0, 0))            # Transparent edge
+        w = self.width()
+        h = self.height()
+        cx = int(self.x_pos * w)
+        cy = int(self.y_pos * h)
 
-        painter.setBrush(grad)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(1, 1, 52, 52)
+        # Draw glowing red laser dot (KDE Connect style)
+        grad = QRadialGradient(cx, cy, 26)
+        grad.setColorAt(0.0, QColor(255, 255, 255, 255))      # Intense white core
+        grad.setColorAt(0.2, QColor(255, 50, 50, 245))        # Bright red core
+        grad.setColorAt(0.45, QColor(255, 10, 10, 200))       # Vivid laser red
+        grad.setColorAt(0.75, QColor(255, 0, 0, 70))          # Glowing halo
+        grad.setColorAt(1.0, QColor(255, 0, 0, 0))            # Soft edge
+
+        p.setBrush(grad)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(cx - 26, cy - 26, 52, 52)
+
+        # Pinpoint white laser center
+        p.setBrush(QColor(255, 255, 255, 245))
+        p.drawEllipse(cx - 3, cy - 3, 6, 6)
 
 
 class LaserListenerThread(QThread):
-    laser_signal = pyqtSignal(bool)
+    laser_packet = pyqtSignal(dict)
 
     def run(self):
         import socket
@@ -485,10 +522,10 @@ class LaserListenerThread(QThread):
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind(('127.0.0.1', 1763))
             while True:
-                data, _ = sock.recvfrom(1024)
+                data, _ = sock.recvfrom(2048)
                 try:
                     payload = json.loads(data.decode('utf-8'))
-                    self.laser_signal.emit(bool(payload.get('laser', False)))
+                    self.laser_packet.emit(payload)
                 except Exception:
                     pass
         except Exception:
@@ -513,7 +550,7 @@ class PCConnectTrayApp:
         # Laser pointer overlay listener
         self.laser_overlay = LaserPointerOverlay()
         self.laser_thread = LaserListenerThread()
-        self.laser_thread.laser_signal.connect(self.laser_overlay.trigger)
+        self.laser_thread.laser_packet.connect(self.laser_overlay.handle_packet)
         self.laser_thread.start()
 
         self.menu = QMenu()

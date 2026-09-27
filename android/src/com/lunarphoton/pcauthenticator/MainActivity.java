@@ -168,7 +168,6 @@ public class MainActivity extends Activity {
         btnRingPc = findViewById(R.id.btn_ring_pc);
         btnLockPc = findViewById(R.id.btn_lock_pc);
         btnRemoteTrackpad = findViewById(R.id.btn_remote_trackpad);
-        btnLaserPointer = findViewById(R.id.btn_laser_pointer);
         btnOpenWebpage = findViewById(R.id.btn_open_webpage);
 
         tvMediaStatus = findViewById(R.id.tv_media_status);

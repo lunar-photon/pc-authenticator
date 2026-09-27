@@ -610,10 +610,13 @@ class VirtualMouse:
 
 virtual_mouse = VirtualMouse()
 
-def trigger_laser_overlay(active=True):
+def trigger_laser_overlay(data):
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        msg = json.dumps({"laser": bool(active)}).encode('utf-8')
+        if isinstance(data, dict):
+            msg = json.dumps(data).encode('utf-8')
+        else:
+            msg = json.dumps({"laser": bool(data)}).encode('utf-8')
         sock.sendto(msg, ('127.0.0.1', 1763))
         sock.close()
     except Exception:
@@ -632,14 +635,13 @@ def start_udp_mouse_listener(port=1762):
                 try:
                     payload = json.loads(data.decode('utf-8'))
                     mtype = payload.get('type', '')
-                    if mtype in ('move', 'pointer'):
+                    if mtype == 'move':
                         virtual_mouse.move(payload.get('dx', 0), payload.get('dy', 0))
-                        if mtype == 'pointer':
-                            laser = payload.get('laser', True)
-                            trigger_laser_overlay(laser)
+                    elif mtype == 'pointer':
+                        # Pointer mode: moves the laser dot overlay, does NOT move OS mouse cursor
+                        trigger_laser_overlay(payload)
                     elif mtype == 'laser_state':
-                        laser = payload.get('laser', False)
-                        trigger_laser_overlay(laser)
+                        trigger_laser_overlay(payload)
                     elif mtype == 'key':
                         virtual_mouse.press_key(payload.get('key', ''))
                     elif mtype == 'click':
@@ -1469,14 +1471,12 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": "unauthorized"}, status=401)
                 return
             mtype = body.get('type', '')
-            if mtype in ('move', 'pointer'):
+            if mtype == 'move':
                 virtual_mouse.move(body.get('dx', 0), body.get('dy', 0))
-                if mtype == 'pointer':
-                    laser = body.get('laser', True)
-                    trigger_laser_overlay(laser)
+            elif mtype == 'pointer':
+                trigger_laser_overlay(body)
             elif mtype == 'laser_state':
-                laser = body.get('laser', False)
-                trigger_laser_overlay(laser)
+                trigger_laser_overlay(body)
             elif mtype == 'key':
                 virtual_mouse.press_key(body.get('key', ''))
             elif mtype == 'click':
