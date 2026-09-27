@@ -24,32 +24,33 @@ def get_phone_status():
     except Exception:
         return None
 
+def choose_device_gui(devices):
+    if not devices:
+        return None
+    if len(devices) == 1:
+        return devices[0]
+
+    # Multiple devices: prompt user with native kdialog
+    try:
+        args = ["kdialog", "--radiolist", "Select device to send file(s) to:"]
+        for idx, dev in enumerate(devices):
+            tag = str(idx)
+            name = f"{dev.get('client_name', 'Android Phone')} ({dev.get('ip', 'Unknown IP')})"
+            status = "on" if idx == 0 else "off"
+            args.extend([tag, name, status])
+        res = subprocess.run(args, capture_output=True, text=True, timeout=30)
+        if res.returncode == 0 and res.stdout.strip():
+            sel_idx = int(res.stdout.strip())
+            return devices[sel_idx]
+        return None
+    except Exception:
+        return devices[0]
+
 def send_file(filepath, phone_ip, phone_port=1761):
     fn = os.path.basename(filepath)
     size = os.path.getsize(filepath)
 
-    # 1. Try local daemon upload proxy (PC -> Daemon -> Phone)
-    try:
-        url = f"{DAEMON_URL}/api/phone/files/upload?path={quote('/storage/emulated/0/Download')}"
-        with open(filepath, 'rb') as f:
-            data = f.read()
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={
-                'Content-Type': 'application/octet-stream',
-                'Content-Length': str(size),
-                'X-Filename': quote(fn)
-            },
-            method='POST'
-        )
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            if resp.status == 200:
-                return True
-    except Exception:
-        pass
-
-    # 2. Try direct HTTP upload to phone file server
+    # 1. Try direct HTTP upload to phone file server if IP is known
     if phone_ip:
         try:
             url = f"http://{phone_ip}:{phone_port}/api/files/upload?path={quote('/storage/emulated/0/Download')}"
@@ -70,6 +71,27 @@ def send_file(filepath, phone_ip, phone_port=1761):
                     return True
         except Exception:
             pass
+
+    # 2. Try local daemon upload proxy (PC -> Daemon -> Phone)
+    try:
+        url = f"{DAEMON_URL}/api/phone/files/upload?path={quote('/storage/emulated/0/Download')}"
+        with open(filepath, 'rb') as f:
+            data = f.read()
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={
+                'Content-Type': 'application/octet-stream',
+                'Content-Length': str(size),
+                'X-Filename': quote(fn)
+            },
+            method='POST'
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            if resp.status == 200:
+                return True
+    except Exception:
+        pass
 
     # 3. Fallback to staging download URL pushed via NDJSON
     try:
@@ -115,10 +137,22 @@ def main():
         notify("PC Connect Error", "PC Authenticator daemon is not running.", icon="dialog-error", urgency="critical")
         sys.exit(1)
 
+    devices = st.get('devices', [])
+    target_device = None
+
+    # If only 1 device is paired, it just sends without any prompt
+    if len(devices) > 1:
+        target_device = choose_device_gui(devices)
+        if not target_device:
+            # User canceled device selection
+            sys.exit(0)
+    elif len(devices) == 1:
+        target_device = devices[0]
+
     phone = st.get('phone', {})
-    phone_ip = phone.get('ip')
+    phone_ip = target_device.get('ip') if target_device else phone.get('ip')
     phone_port = phone.get('port', 1761)
-    phone_name = phone.get('client_name', 'Android Phone')
+    phone_name = target_device.get('client_name') if target_device else phone.get('client_name', 'Android Phone')
 
     total = len(files)
     success_count = 0

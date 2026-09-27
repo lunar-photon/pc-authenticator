@@ -999,10 +999,26 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
                         active_phone_state['ip'] = client['ip']
                         active_phone_state['client_name'] = client.get('client_name', 'Android Phone')
                         break
+
+            # Deduplicate paired devices by unique client_id
+            devices_by_id = {}
+            for token, client in cfg.get('paired_clients', {}).items():
+                cid = client.get('client_id') or token
+                if cid == "phone-auto-test" and len(cfg.get('paired_clients', {})) > 1:
+                    continue
+                devices_by_id[cid] = {
+                    "token": token,
+                    "client_id": cid,
+                    "client_name": client.get('client_name', 'Android Phone'),
+                    "ip": client.get('ip')
+                }
+            device_list = list(devices_by_id.values())
+
             self.send_json({
                 "connected": is_connected,
                 "phone": active_phone_state,
-                "clients_count": len(cfg.get('paired_clients', {}))
+                "clients_count": len(device_list),
+                "devices": device_list
             })
             return
 
@@ -1274,6 +1290,11 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
                 cfg = load_config()
                 if "paired_clients" not in cfg:
                     cfg["paired_clients"] = {}
+                # Deduplicate by client_id so same device doesn't create duplicate tokens
+                cfg["paired_clients"] = {
+                    tok: c for tok, c in cfg["paired_clients"].items()
+                    if c.get("client_id") != client_id
+                }
                 cfg["paired_clients"][auth_token] = {
                     "client_id": client_id,
                     "client_name": client_name,
