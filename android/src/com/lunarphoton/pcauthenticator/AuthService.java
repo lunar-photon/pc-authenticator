@@ -372,7 +372,7 @@ public class AuthService extends Service {
                     active.activeUrl = targetUrl;
 
                     String modeTag = isInternet ? "🌐 Internet" : "🟢 Wi-Fi";
-                    broadcastStatus(true, "Connected • " + modeTag + " • 🔒 Paired");
+                    broadcastStatus(true, "Connected • " + modeTag + " • 🔒 Paired", isInternet);
                     updateForegroundNotification("Connected to " + active.hostname + " (" + (isInternet ? "Internet" : "Wi-Fi") + ")");
                     sendPhoneStatusToPc(active);
 
@@ -693,9 +693,14 @@ public class AuthService extends Service {
     }
 
     private void broadcastStatus(boolean connected, String statusText) {
+        broadcastStatus(connected, statusText, DeviceManager.isInternetActive(this));
+    }
+
+    private void broadcastStatus(boolean connected, String statusText, boolean isInternet) {
         Intent intent = new Intent(ACTION_STATUS);
         intent.putExtra("connected", connected);
         intent.putExtra("status_text", statusText);
+        intent.putExtra("is_internet", isInternet);
         sendBroadcast(intent);
     }
 

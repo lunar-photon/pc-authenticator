@@ -359,13 +359,36 @@
             android:padding="16dp"
             android:layout_marginBottom="16dp">
 
-            <TextView
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="🚀 FILE SHARING &amp; QUICK ACTIONS"
-                android:textSize="11sp"
-                android:textStyle="bold"
-                android:textColor="@color/accent_cyan" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="🚀 FILE SHARING &amp; QUICK ACTIONS"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/accent_cyan" />
+
+                <TextView
+                    android:id="@+id/tv_network_mode_badge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🌐 Remote Mode"
+                    android:textSize="10sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/accent_cyan"
+                    android:background="@drawable/badge_remote"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:paddingTop="2dp"
+                    android:paddingBottom="2dp"
+                    android:visibility="gone" />
+            </LinearLayout>
 
             <Button
                 android:id="@+id/btn_send_file_to_pc"

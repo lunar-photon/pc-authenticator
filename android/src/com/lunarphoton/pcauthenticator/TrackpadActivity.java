@@ -84,6 +84,11 @@ public class TrackpadActivity extends Activity implements SensorEventListener {
         setContentView(R.layout.activity_trackpad);
 
         activeDevice = DeviceManager.getActiveDevice(this);
+        if (DeviceManager.isInternetActive(this)) {
+            Toast.makeText(this, "🖱️ Trackpad & Laser is only available on local Wi-Fi", Toast.LENGTH_LONG).show();
+            finish();
+            return;
+        }
         vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
         sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         if (sensorManager != null) {

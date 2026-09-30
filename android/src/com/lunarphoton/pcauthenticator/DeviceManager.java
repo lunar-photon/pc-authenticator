@@ -46,6 +46,23 @@ public class DeviceManager {
         return activeUrlOverride != null && activeUrlOverride.startsWith("https://");
     }
 
+    public static boolean isInternetActive(Context context) {
+        if (activeUrlOverride != null) {
+            return activeUrlOverride.startsWith("https://");
+        }
+        if (context != null) {
+            PairedDevice active = getActiveDevice(context);
+            if (active != null) {
+                String base = active.getBaseUrl();
+                if (base != null && base.startsWith("https://")) return true;
+                if (!isWifiActive(context) && active.internetUrl != null && !active.internetUrl.isEmpty()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     public interface DiscoveryCallback {
         void onDiscovered(PairedDevice device);
         void onFinished(List<PairedDevice> allFound);

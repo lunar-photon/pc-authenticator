@@ -65,6 +65,11 @@ public class CameraActivity extends Activity {
         setContentView(R.layout.activity_camera);
 
         activeDevice = DeviceManager.getActiveDevice(this);
+        if (DeviceManager.isInternetActive(this)) {
+            Toast.makeText(this, "📹 PC Camera streaming is only available on local Wi-Fi", Toast.LENGTH_LONG).show();
+            finish();
+            return;
+        }
         vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
 
         ivCameraFeed = findViewById(R.id.iv_camera_feed);

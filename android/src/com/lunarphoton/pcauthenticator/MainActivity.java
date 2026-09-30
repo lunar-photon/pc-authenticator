@@ -122,6 +122,7 @@ public class MainActivity extends Activity {
 
     private LinearLayout layoutIdle;
 
+    private TextView tvNetworkModeBadge;
     private TextView tvDeviceCount;
     private Button btnScanNetwork;
     private Button btnAddManual;
@@ -147,7 +148,10 @@ public class MainActivity extends Activity {
             } else if (AuthService.ACTION_STATUS.equals(action)) {
                 boolean connected = intent.getBooleanExtra("connected", false);
                 String statusText = intent.getStringExtra("status_text");
-                updateConnectionStatus(connected, statusText);
+                boolean isInternet = intent.getBooleanExtra("is_internet", false)
+                        || (statusText != null && statusText.contains("Internet"))
+                        || DeviceManager.isInternetActive(MainActivity.this);
+                updateConnectionStatus(connected, statusText, isInternet);
             } else if ("com.lunarphoton.pcauthenticator.CHALLENGE_RESOLVED".equals(action)) {
                 hideChallenge();
             }
@@ -201,6 +205,7 @@ public class MainActivity extends Activity {
         btnRingPc = findViewById(R.id.btn_ring_pc);
         btnRemoteTrackpad = findViewById(R.id.btn_remote_trackpad);
         btnCameraView = findViewById(R.id.btn_camera_view);
+        tvNetworkModeBadge = findViewById(R.id.tv_network_mode_badge);
 
         tvMediaStatus = findViewById(R.id.tv_media_status);
         tvMediaTitle = findViewById(R.id.tv_media_title);
@@ -258,7 +263,13 @@ public class MainActivity extends Activity {
 
         // Listeners
         btnTestConnection.setOnClickListener(v -> testActiveConnection());
-        btnScanNetwork.setOnClickListener(v -> startNetworkScan());
+        btnScanNetwork.setOnClickListener(v -> {
+            if (DeviceManager.isInternetActive(MainActivity.this)) {
+                Toast.makeText(MainActivity.this, "🔍 Auto-Scan Wi-Fi is not available over Internet.", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            startNetworkScan();
+        });
         btnAddManual.setOnClickListener(v -> showAddDeviceDialog());
 
         btnApproveChallenge.setOnClickListener(v -> {
@@ -503,10 +514,12 @@ public class MainActivity extends Activity {
         List<PairedDevice> devices = DeviceManager.getDevices(this);
         PairedDevice active = DeviceManager.getActiveDevice(this);
 
+        boolean isInternet = DeviceManager.isInternetActive(this);
         tvHostname.setText(active.hostname);
-        String modePrefix = DeviceManager.isInternetActive() ? "🌐 Internet: " : "🟢 Wi-Fi: ";
+        String modePrefix = isInternet ? "🌐 Internet: " : "🟢 Wi-Fi: ";
         tvActiveIp.setText(modePrefix + active.getBaseUrl());
         tvDeviceCount.setText(devices.size() + " Saved");
+        updateDynamicUI(isInternet);
 
         containerDevices.removeAllViews();
         LayoutInflater inflater = LayoutInflater.from(this);
@@ -831,17 +844,17 @@ public class MainActivity extends Activity {
                         tvHostname.setText(host);
                         String modeTag = finalIsInternet ? "🌐 Internet" : "🟢 Wi-Fi";
                         if (active.isPaired()) {
-                            updateConnectionStatus(true, "Connected • " + modeTag + " • 🔒 Paired (" + latency + "ms)");
+                            updateConnectionStatus(true, "Connected • " + modeTag + " • 🔒 Paired (" + latency + "ms)", finalIsInternet);
                         } else {
-                            updateConnectionStatus(false, "Connected • " + modeTag + " • ⚠️ Unpaired (Tap 'Pair 🔑' below)");
+                            updateConnectionStatus(false, "Connected • " + modeTag + " • ⚠️ Unpaired (Tap 'Pair 🔑' below)", finalIsInternet);
                         }
                         tvActiveIp.setText(modeTag + ": " + finalUrl);
                         Toast.makeText(MainActivity.this, "Connected to " + host + " (" + modeTag + ", " + latency + "ms)", Toast.LENGTH_SHORT).show();
                     } catch (Exception e) {
-                        updateConnectionStatus(true, "Connected");
+                        updateConnectionStatus(true, "Connected", finalIsInternet);
                     }
                 } else {
-                    updateConnectionStatus(false, "Connection Failed");
+                    updateConnectionStatus(false, "Connection Failed", DeviceManager.isInternetActive(MainActivity.this));
                     Toast.makeText(MainActivity.this, "Cannot connect to " + active.hostname + " via Wi-Fi or Internet", Toast.LENGTH_LONG).show();
                 }
             });
@@ -929,12 +942,65 @@ public class MainActivity extends Activity {
     }
 
     private void updateConnectionStatus(boolean connected, String text) {
+        updateConnectionStatus(connected, text, DeviceManager.isInternetActive(this));
+    }
+
+    private void updateConnectionStatus(boolean connected, String text, boolean isInternet) {
         if (connected) {
             tvStatusDot.setTextColor(Color.parseColor("#10b981"));
             tvStatusText.setText(text);
         } else {
             tvStatusDot.setTextColor(Color.parseColor("#ef4444"));
             tvStatusText.setText(text);
+        }
+        updateDynamicUI(isInternet);
+    }
+
+    private void updateDynamicUI(boolean isInternet) {
+        try {
+            android.transition.TransitionManager.beginDelayedTransition((android.view.ViewGroup) findViewById(android.R.id.content));
+        } catch (Exception ignored) {}
+
+        if (tvNetworkModeBadge != null) {
+            if (isInternet) {
+                tvNetworkModeBadge.setVisibility(View.VISIBLE);
+                tvNetworkModeBadge.setText("🌐 Remote Mode");
+            } else {
+                tvNetworkModeBadge.setVisibility(View.GONE);
+            }
+        }
+
+        // 1. Auto-Scan Wi-Fi (hidden on Internet)
+        if (btnScanNetwork != null) {
+            btnScanNetwork.setVisibility(isInternet ? View.GONE : View.VISIBLE);
+        }
+        if (btnAddManual != null) {
+            LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) btnAddManual.getLayoutParams();
+            if (isInternet) {
+                lp.setMarginStart(0);
+            } else {
+                lp.setMarginStart((int) (6 * getResources().getDisplayMetrics().density));
+            }
+            btnAddManual.setLayoutParams(lp);
+        }
+
+        // 2. PC Camera (hidden on Internet)
+        if (btnCameraView != null) {
+            btnCameraView.setVisibility(isInternet ? View.GONE : View.VISIBLE);
+        }
+        if (btnRingPc != null) {
+            LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) btnRingPc.getLayoutParams();
+            if (isInternet) {
+                lp.setMarginEnd(0);
+            } else {
+                lp.setMarginEnd((int) (4 * getResources().getDisplayMetrics().density));
+            }
+            btnRingPc.setLayoutParams(lp);
+        }
+
+        // 3. Trackpad & Laser (hidden on Internet)
+        if (btnRemoteTrackpad != null) {
+            btnRemoteTrackpad.setVisibility(isInternet ? View.GONE : View.VISIBLE);
         }
     }
 
@@ -1274,12 +1340,20 @@ public class MainActivity extends Activity {
         if (btnRingPc != null) btnRingPc.setOnClickListener(v -> ringPc());
         if (btnRemoteTrackpad != null) {
             btnRemoteTrackpad.setOnClickListener(v -> {
+                if (DeviceManager.isInternetActive(MainActivity.this)) {
+                    Toast.makeText(MainActivity.this, "🖱️ Trackpad & Laser is only available on local Wi-Fi", Toast.LENGTH_SHORT).show();
+                    return;
+                }
                 Intent intent = new Intent(MainActivity.this, TrackpadActivity.class);
                 startActivity(intent);
             });
         }
         if (btnCameraView != null) {
             btnCameraView.setOnClickListener(v -> {
+                if (DeviceManager.isInternetActive(MainActivity.this)) {
+                    Toast.makeText(MainActivity.this, "📹 PC Camera streaming is only available on local Wi-Fi", Toast.LENGTH_SHORT).show();
+                    return;
+                }
                 Intent intent = new Intent(MainActivity.this, CameraActivity.class);
                 startActivity(intent);
             });
