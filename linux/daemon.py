@@ -24,7 +24,11 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(BASE_DIR, 'config.json')
 STATIC_DIR = os.path.join(BASE_DIR, 'static')
-APK_FILE = os.path.join(STATIC_DIR, 'authenticator.apk')
+APK_FILE = os.path.join(STATIC_DIR, 'PCAuthenticator.apk')
+if not os.path.exists(APK_FILE):
+    _alt = os.path.join(STATIC_DIR, 'authenticator.apk')
+    if os.path.exists(_alt):
+        APK_FILE = _alt
 STAGING_DIR = os.path.join(BASE_DIR, 'staging')
 os.makedirs(STAGING_DIR, exist_ok=True)
 
@@ -1569,7 +1573,7 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             return
 
         # 2. APK Download
-        elif path in ('/apk', '/authenticator.apk', '/download'):
+        elif path in ('/apk', '/PCAuthenticator.apk', '/authenticator.apk', '/download'):
             self.serve_apk()
             return
 
@@ -2812,7 +2816,7 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-Type', 'application/vnd.android.package-archive')
             self.send_header('Content-Length', str(size))
-            self.send_header('Content-Disposition', 'attachment; filename="authenticator.apk"')
+            self.send_header('Content-Disposition', 'attachment; filename="PCAuthenticator.apk"')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             with open(APK_FILE, 'rb') as f:

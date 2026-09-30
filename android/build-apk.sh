@@ -65,14 +65,12 @@ if [ -f "$SIGNED_APK" ]; then
     echo "✅ Custom APK built and signed successfully!"
     echo "Source APK: $SIGNED_APK"
     
-    # Deploy to Downloads and daemon static folder
+    # Deploy only PCAuthenticator.apk
     cp -f "$SIGNED_APK" "/home/lunarphoton/Downloads/PCAuthenticator.apk"
-    cp -f "$SIGNED_APK" "/home/lunarphoton/Downloads/authenticator.apk"
-    cp -f "$SIGNED_APK" "/home/lunarphoton/.config/pc-authenticator/static/authenticator.apk"
+    rm -f "/home/lunarphoton/Downloads/authenticator.apk" "/home/lunarphoton/Downloads/PCConnect.apk"
     
     echo "Deployed to:"
     echo "📁 /home/lunarphoton/Downloads/PCAuthenticator.apk"
-    echo "📁 /home/lunarphoton/Downloads/authenticator.apk"
     echo "=================================================="
     ls -lh "/home/lunarphoton/Downloads/PCAuthenticator.apk"
 else
