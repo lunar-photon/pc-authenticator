@@ -32,14 +32,46 @@ public class DeviceManager {
     private static final String DEFAULT_IP = "192.168.48.40";
     private static final int DEFAULT_PORT = 1760;
 
+    private static final String PREF_LAST_ACTIVE_URL = "last_active_route_url";
     private static volatile String activeUrlOverride = null;
 
     public static void setActiveUrl(String url) {
         activeUrlOverride = (url != null && !url.isEmpty()) ? url.trim() : null;
     }
 
+    public static void setActiveUrl(Context context, String url) {
+        setActiveUrl(url);
+        if (context != null) {
+            try {
+                SharedPreferences prefs = context.getSharedPreferences("pc_auth_prefs", Context.MODE_PRIVATE);
+                if (url != null && !url.isEmpty()) {
+                    prefs.edit().putString(PREF_LAST_ACTIVE_URL, url.trim()).apply();
+                } else {
+                    prefs.edit().remove(PREF_LAST_ACTIVE_URL).apply();
+                }
+            } catch (Exception ignored) {}
+        }
+    }
+
     public static String getActiveUrl() {
         return activeUrlOverride;
+    }
+
+    public static String getActiveUrl(Context context) {
+        if (activeUrlOverride != null && !activeUrlOverride.isEmpty()) {
+            return activeUrlOverride;
+        }
+        if (context != null) {
+            try {
+                SharedPreferences prefs = context.getSharedPreferences("pc_auth_prefs", Context.MODE_PRIVATE);
+                String saved = prefs.getString(PREF_LAST_ACTIVE_URL, null);
+                if (saved != null && !saved.isEmpty()) {
+                    activeUrlOverride = saved;
+                    return saved;
+                }
+            } catch (Exception ignored) {}
+        }
+        return null;
     }
 
     public static boolean isInternetActive() {
@@ -47,15 +79,17 @@ public class DeviceManager {
     }
 
     public static boolean isInternetActive(Context context) {
-        if (activeUrlOverride != null) {
-            return activeUrlOverride.startsWith("https://");
+        String active = getActiveUrl(context);
+        if (active != null && !active.isEmpty()) {
+            return active.startsWith("https://");
         }
         if (context != null) {
-            PairedDevice active = getActiveDevice(context);
-            if (active != null) {
-                String base = active.getBaseUrl();
+            PairedDevice dev = getActiveDevice(context);
+            if (dev != null) {
+                if (dev.activeUrl != null && dev.activeUrl.startsWith("https://")) return true;
+                String base = dev.getBaseUrl();
                 if (base != null && base.startsWith("https://")) return true;
-                if (!isWifiActive(context) && active.internetUrl != null && !active.internetUrl.isEmpty()) {
+                if (!isWifiActive(context) && dev.internetUrl != null && !dev.internetUrl.isEmpty()) {
                     return true;
                 }
             }
@@ -138,16 +172,19 @@ public class DeviceManager {
             target = new PairedDevice(DEFAULT_DEVICE_ID, DEFAULT_HOSTNAME, DEFAULT_IP, DEFAULT_PORT, "lunarphoton", null, null, true);
         }
 
-        // Automatic instant route adaptation based on physical network interface
-        boolean wifi = isWifiActive(context);
-        if (!wifi && target.internetUrl != null && !target.internetUrl.isEmpty()) {
-            setActiveUrl(target.internetUrl);
-            target.activeUrl = target.internetUrl;
-        } else if (activeUrlOverride != null && !activeUrlOverride.isEmpty()) {
-            target.activeUrl = activeUrlOverride;
-        } else if (wifi && target.localUrl != null && !target.localUrl.isEmpty()) {
-            setActiveUrl(target.localUrl);
-            target.activeUrl = target.localUrl;
+        // Prioritize verified active route url if already established
+        String verifiedUrl = getActiveUrl(context);
+        if (verifiedUrl != null && !verifiedUrl.isEmpty()) {
+            target.activeUrl = verifiedUrl;
+        } else {
+            boolean wifi = isWifiActive(context);
+            if (!wifi && target.internetUrl != null && !target.internetUrl.isEmpty()) {
+                target.activeUrl = target.internetUrl;
+                setActiveUrl(context, target.internetUrl);
+            } else if (target.localUrl != null && !target.localUrl.isEmpty()) {
+                target.activeUrl = target.localUrl;
+                setActiveUrl(context, target.localUrl);
+            }
         }
 
         return target;

@@ -8,9 +8,19 @@ ANDROID_JAR="$TOOLCHAIN/android.jar"
 R8_JAR="$TOOLCHAIN/r8.jar"
 SIGNER_JAR="$TOOLCHAIN/uber-apk-signer.jar"
 
+REPO_DIR="/home/lunarphoton/Downloads/All/pc-authenticator/android"
 PROJECT="/home/lunarphoton/.local/share/pc-authenticator-android"
 BUILD_DIR="$PROJECT/build"
 DIST_DIR="$PROJECT/dist"
+
+# If repo source exists, sync latest source & res to toolchain build project
+if [ -d "$REPO_DIR/src" ] && [ -d "$REPO_DIR/res" ]; then
+    echo "[0/6] Syncing latest code and resources from repository..."
+    mkdir -p "$PROJECT/src" "$PROJECT/res"
+    cp -r "$REPO_DIR/src/"* "$PROJECT/src/"
+    cp -r "$REPO_DIR/res/"* "$PROJECT/res/"
+    cp "$REPO_DIR/AndroidManifest.xml" "$PROJECT/AndroidManifest.xml"
+fi
 
 echo "[1/6] Cleaning previous build..."
 rm -rf "$BUILD_DIR" "$DIST_DIR"
@@ -65,12 +75,22 @@ if [ -f "$SIGNED_APK" ]; then
     echo "✅ Custom APK built and signed successfully!"
     echo "Source APK: $SIGNED_APK"
     
-    # Deploy only PCAuthenticator.apk
+    # Deploy PCAuthenticator.apk to all distribution locations
     cp -f "$SIGNED_APK" "/home/lunarphoton/Downloads/PCAuthenticator.apk"
+    cp -f "$SIGNED_APK" "/home/lunarphoton/Downloads/All/pc-authenticator/android/PCAuthenticator.apk" 2>/dev/null || true
+    cp -f "$SIGNED_APK" "/home/lunarphoton/Downloads/All/pc-authenticator/linux/static/PCAuthenticator.apk" 2>/dev/null || true
+    if [ -d "/home/lunarphoton/.config/pc-authenticator/static" ]; then
+        cp -f "$SIGNED_APK" "/home/lunarphoton/.config/pc-authenticator/static/PCAuthenticator.apk"
+    fi
     rm -f "/home/lunarphoton/Downloads/authenticator.apk" "/home/lunarphoton/Downloads/PCConnect.apk"
     
     echo "Deployed to:"
     echo "📁 /home/lunarphoton/Downloads/PCAuthenticator.apk"
+    echo "📁 /home/lunarphoton/Downloads/All/pc-authenticator/android/PCAuthenticator.apk"
+    echo "📁 /home/lunarphoton/Downloads/All/pc-authenticator/linux/static/PCAuthenticator.apk"
+    if [ -d "/home/lunarphoton/.config/pc-authenticator/static" ]; then
+        echo "📁 /home/lunarphoton/.config/pc-authenticator/static/PCAuthenticator.apk"
+    fi
     echo "=================================================="
     ls -lh "/home/lunarphoton/Downloads/PCAuthenticator.apk"
 else

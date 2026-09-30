@@ -122,6 +122,9 @@ public class MainActivity extends Activity {
 
     private LinearLayout layoutIdle;
 
+    private TextView tvActiveModeChip;
+    private View layoutLanFeatures;
+    private View layoutLanNotice;
     private TextView tvNetworkModeBadge;
     private TextView tvDeviceCount;
     private Button btnScanNetwork;
@@ -205,7 +208,10 @@ public class MainActivity extends Activity {
         btnRingPc = findViewById(R.id.btn_ring_pc);
         btnRemoteTrackpad = findViewById(R.id.btn_remote_trackpad);
         btnCameraView = findViewById(R.id.btn_camera_view);
+        layoutLanFeatures = findViewById(R.id.layout_lan_features);
+        layoutLanNotice = findViewById(R.id.layout_lan_notice);
         tvNetworkModeBadge = findViewById(R.id.tv_network_mode_badge);
+        tvActiveModeChip = findViewById(R.id.tv_active_mode_chip);
 
         tvMediaStatus = findViewById(R.id.tv_media_status);
         tvMediaTitle = findViewById(R.id.tv_media_title);
@@ -816,10 +822,10 @@ public class MainActivity extends Activity {
                 res = NetworkUtils.httpGet(url + "/api/info", 4500);
                 if (res != null) {
                     isInternet = true;
-                    DeviceManager.setActiveUrl(url);
+                    DeviceManager.setActiveUrl(MainActivity.this, url);
                 }
             } else if (res != null) {
-                DeviceManager.setActiveUrl(url);
+                DeviceManager.setActiveUrl(MainActivity.this, url);
                 isInternet = url.startsWith("https://");
             }
             long latency = System.currentTimeMillis() - start;
@@ -961,6 +967,18 @@ public class MainActivity extends Activity {
             android.transition.TransitionManager.beginDelayedTransition((android.view.ViewGroup) findViewById(android.R.id.content));
         } catch (Exception ignored) {}
 
+        if (tvActiveModeChip != null) {
+            if (isInternet) {
+                tvActiveModeChip.setText("🌐 Internet Remote");
+                tvActiveModeChip.setTextColor(Color.parseColor("#06b6d4"));
+                tvActiveModeChip.setBackgroundResource(R.drawable.badge_remote);
+            } else {
+                tvActiveModeChip.setText("🟢 Local Wi-Fi");
+                tvActiveModeChip.setTextColor(Color.parseColor("#10b981"));
+                tvActiveModeChip.setBackgroundResource(R.drawable.badge_wifi);
+            }
+        }
+
         if (tvNetworkModeBadge != null) {
             if (isInternet) {
                 tvNetworkModeBadge.setVisibility(View.VISIBLE);
@@ -970,7 +988,15 @@ public class MainActivity extends Activity {
             }
         }
 
-        // 1. Auto-Scan Wi-Fi (hidden on Internet)
+        // LAN features container vs notice banner
+        if (layoutLanFeatures != null) {
+            layoutLanFeatures.setVisibility(isInternet ? View.GONE : View.VISIBLE);
+        }
+        if (layoutLanNotice != null) {
+            layoutLanNotice.setVisibility(isInternet ? View.VISIBLE : View.GONE);
+        }
+
+        // Auto-Scan Wi-Fi (hidden on Internet)
         if (btnScanNetwork != null) {
             btnScanNetwork.setVisibility(isInternet ? View.GONE : View.VISIBLE);
         }
@@ -982,25 +1008,6 @@ public class MainActivity extends Activity {
                 lp.setMarginStart((int) (6 * getResources().getDisplayMetrics().density));
             }
             btnAddManual.setLayoutParams(lp);
-        }
-
-        // 2. PC Camera (hidden on Internet)
-        if (btnCameraView != null) {
-            btnCameraView.setVisibility(isInternet ? View.GONE : View.VISIBLE);
-        }
-        if (btnRingPc != null) {
-            LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) btnRingPc.getLayoutParams();
-            if (isInternet) {
-                lp.setMarginEnd(0);
-            } else {
-                lp.setMarginEnd((int) (4 * getResources().getDisplayMetrics().density));
-            }
-            btnRingPc.setLayoutParams(lp);
-        }
-
-        // 3. Trackpad & Laser (hidden on Internet)
-        if (btnRemoteTrackpad != null) {
-            btnRemoteTrackpad.setVisibility(isInternet ? View.GONE : View.VISIBLE);
         }
     }
 

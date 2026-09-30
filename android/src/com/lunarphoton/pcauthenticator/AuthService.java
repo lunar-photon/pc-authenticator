@@ -175,7 +175,7 @@ public class AuthService extends Service {
                         if (networkChanged || currentConn != null) {
                             boolean wifi = DeviceManager.isWifiActive(AuthService.this);
                             Log.i(TAG, "Network route changed/available (Wi-Fi=" + wifi + "). Rapidly adapting active connection...");
-                            DeviceManager.setActiveUrl(null);
+                            DeviceManager.setActiveUrl(AuthService.this, null);
                             abortCurrentConnectionAndWake();
                         }
                     }
@@ -186,7 +186,7 @@ public class AuthService extends Service {
                         if (network.equals(lastKnownNetwork)) {
                             lastKnownNetwork = null;
                         }
-                        DeviceManager.setActiveUrl(null);
+                        DeviceManager.setActiveUrl(AuthService.this, null);
                         abortCurrentConnectionAndWake();
                     }
                 };
@@ -368,7 +368,7 @@ public class AuthService extends Service {
                 currentConn = conn;
                 if (code == 200) {
                     consecutiveFails = 0;
-                    DeviceManager.setActiveUrl(targetUrl);
+                    DeviceManager.setActiveUrl(AuthService.this, targetUrl);
                     active.activeUrl = targetUrl;
 
                     String modeTag = isInternet ? "🌐 Internet" : "🟢 Wi-Fi";

@@ -9,15 +9,15 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="20dp">
+        android:padding="16dp">
 
-        <!-- Header -->
+        <!-- Top Header Bar -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginBottom="16dp">
+            android:layout_marginBottom="14dp">
 
             <LinearLayout
                 android:layout_width="0dp"
@@ -36,7 +36,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Linux Desktop Connect &amp; 2FA Suite"
+                    android:text="Linux Desktop 2FA &amp; Remote Control"
                     android:textSize="12sp"
                     android:textColor="@color/text_muted"
                     android:layout_marginTop="2dp" />
@@ -44,8 +44,8 @@
 
             <Button
                 android:id="@+id/btn_settings"
-                android:layout_width="44dp"
-                android:layout_height="44dp"
+                android:layout_width="42dp"
+                android:layout_height="42dp"
                 android:text="⚙️"
                 android:textSize="18sp"
                 android:textColor="@color/text_white"
@@ -59,41 +59,65 @@
             android:orientation="vertical"
             android:background="@drawable/card_bg"
             android:padding="16dp"
-            android:layout_marginBottom="16dp">
+            android:layout_marginBottom="14dp">
 
-            <TextView
-                android:layout_width="wrap_content"
+            <!-- Card Header: Title + Dynamic Route Chip -->
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="ACTIVE TARGET LAPTOP"
-                android:textSize="11sp"
-                android:textStyle="bold"
-                android:textColor="@color/accent_cyan" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="ACTIVE TARGET LAPTOP"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/accent_cyan" />
+
+                <TextView
+                    android:id="@+id/tv_active_mode_chip"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🟢 Local Wi-Fi"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/status_green"
+                    android:background="@drawable/badge_wifi"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:paddingTop="3dp"
+                    android:paddingBottom="3dp" />
+            </LinearLayout>
 
             <TextView
                 android:id="@+id/tv_hostname"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="cachyos-x8664"
-                android:textSize="18sp"
+                android:textSize="19sp"
                 android:textStyle="bold"
                 android:textColor="@color/text_white"
-                android:layout_marginTop="4dp" />
+                android:layout_marginTop="6dp" />
 
             <TextView
                 android:id="@+id/tv_active_ip"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="http://192.168.48.40:1760"
+                android:text="http://192.168.48.250:1760"
                 android:textSize="12sp"
                 android:textColor="@color/text_muted"
                 android:layout_marginTop="2dp" />
 
+            <!-- Live Status Dot and Text -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
-                android:layout_marginTop="12dp">
+                android:layout_marginTop="10dp">
 
                 <TextView
                     android:id="@+id/tv_status_dot"
@@ -123,175 +147,7 @@
                 android:layout_marginTop="12dp" />
         </LinearLayout>
 
-        <!-- Laptop Live Status & Remote Controls Card -->
-        <LinearLayout
-            android:id="@+id/layout_laptop_status"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:background="@drawable/card_bg"
-            android:padding="16dp"
-            android:layout_marginBottom="16dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical">
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="💻 LAPTOP LIVE STATUS"
-                    android:textSize="11sp"
-                    android:textStyle="bold"
-                    android:textColor="@color/accent_cyan" />
-
-                <TextView
-                    android:id="@+id/tv_pc_lock_badge"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="🔓 Unlocked"
-                    android:textSize="11sp"
-                    android:textStyle="bold"
-                    android:textColor="@color/status_green" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginTop="10dp">
-
-                <TextView
-                    android:id="@+id/tv_pc_battery"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="🔋 Battery: --%"
-                    android:textSize="12sp"
-                    android:textColor="@color/text_white" />
-
-                <TextView
-                    android:id="@+id/tv_pc_uptime"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="⏱️ Uptime: --"
-                    android:textSize="12sp"
-                    android:textColor="@color/text_muted" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginTop="6dp">
-
-                <TextView
-                    android:id="@+id/tv_pc_cpu"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="📊 CPU: --%"
-                    android:textSize="12sp"
-                    android:textColor="@color/text_white" />
-
-                <TextView
-                    android:id="@+id/tv_pc_memory"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="💾 RAM: --"
-                    android:textSize="12sp"
-                    android:textColor="@color/text_muted" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginTop="6dp">
-
-                <TextView
-                    android:id="@+id/tv_pc_storage"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="💽 Disk: -- GB free / -- GB"
-                    android:textSize="12sp"
-                    android:textColor="@color/text_white" />
-            </LinearLayout>
-
-            <TextView
-                android:id="@+id/tv_pc_weather"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="🌤️ Weather: Loading..."
-                android:textSize="12sp"
-                android:textColor="@color/accent_cyan"
-                android:layout_marginTop="8dp" />
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginTop="12dp">
-
-                <Button
-                    android:id="@+id/btn_lock_laptop_action"
-                    android:layout_width="0dp"
-                    android:layout_height="40dp"
-                    android:layout_weight="1"
-                    android:text="🔒 Lock Screen"
-                    android:textSize="11sp"
-                    android:textStyle="bold"
-                    android:textColor="@color/text_white"
-                    android:background="@drawable/btn_deny"
-                    android:layout_marginEnd="6dp" />
-
-                <Button
-                    android:id="@+id/btn_screenshot_action"
-                    android:layout_width="0dp"
-                    android:layout_height="40dp"
-                    android:layout_weight="1"
-                    android:text="📸 Screen View"
-                    android:textSize="11sp"
-                    android:textStyle="bold"
-                    android:textColor="@color/text_white"
-                    android:background="@drawable/card_bg" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginTop="6dp">
-
-                <Button
-                    android:id="@+id/btn_browse_laptop_action"
-                    android:layout_width="0dp"
-                    android:layout_height="40dp"
-                    android:layout_weight="1"
-                    android:text="📁 Browse Storage"
-                    android:textSize="11sp"
-                    android:textStyle="bold"
-                    android:textColor="@color/text_white"
-                    android:background="@drawable/card_bg"
-                    android:layout_marginEnd="6dp" />
-
-                <Button
-                    android:id="@+id/btn_search_files_action"
-                    android:layout_width="0dp"
-                    android:layout_height="40dp"
-                    android:layout_weight="1"
-                    android:text="🔍 Search Files"
-                    android:textSize="11sp"
-                    android:textStyle="bold"
-                    android:textColor="@color/text_white"
-                    android:background="@drawable/card_bg" />
-            </LinearLayout>
-        </LinearLayout>
-
-        <!-- Active Challenge Card -->
+        <!-- Active Unlock Challenge Card (Appears during 2FA) -->
         <LinearLayout
             android:id="@+id/layout_challenge"
             android:layout_width="match_parent"
@@ -299,7 +155,7 @@
             android:orientation="vertical"
             android:background="@drawable/card_bg"
             android:padding="20dp"
-            android:layout_marginBottom="16dp"
+            android:layout_marginBottom="14dp"
             android:visibility="gone">
 
             <TextView
@@ -350,14 +206,15 @@
                 android:layout_marginTop="10dp" />
         </LinearLayout>
 
-        <!-- File Sharing & Quick Actions Card -->
+        <!-- Laptop Live Status & Controls Card -->
         <LinearLayout
+            android:id="@+id/layout_laptop_status"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:background="@drawable/card_bg"
             android:padding="16dp"
-            android:layout_marginBottom="16dp">
+            android:layout_marginBottom="14dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -369,7 +226,194 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="🚀 FILE SHARING &amp; QUICK ACTIONS"
+                    android:text="💻 LAPTOP LIVE METRICS"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/accent_cyan" />
+
+                <TextView
+                    android:id="@+id/tv_pc_lock_badge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🔓 Unlocked"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/status_green" />
+            </LinearLayout>
+
+            <!-- Metrics Grid Row 1: Battery & Uptime -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="10dp">
+
+                <TextView
+                    android:id="@+id/tv_pc_battery"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="🔋 Battery: --%"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_white"
+                    android:background="@drawable/metric_card_bg"
+                    android:padding="10dp"
+                    android:layout_marginEnd="4dp" />
+
+                <TextView
+                    android:id="@+id/tv_pc_uptime"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="⏱️ Uptime: --"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_muted"
+                    android:background="@drawable/metric_card_bg"
+                    android:padding="10dp"
+                    android:layout_marginStart="4dp" />
+            </LinearLayout>
+
+            <!-- Metrics Grid Row 2: CPU & RAM -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="6dp">
+
+                <TextView
+                    android:id="@+id/tv_pc_cpu"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="📊 CPU: --%"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_white"
+                    android:background="@drawable/metric_card_bg"
+                    android:padding="10dp"
+                    android:layout_marginEnd="4dp" />
+
+                <TextView
+                    android:id="@+id/tv_pc_memory"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="💾 RAM: --"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_muted"
+                    android:background="@drawable/metric_card_bg"
+                    android:padding="10dp"
+                    android:layout_marginStart="4dp" />
+            </LinearLayout>
+
+            <!-- Storage Metric Row -->
+            <TextView
+                android:id="@+id/tv_pc_storage"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="💽 Disk: -- GB free"
+                android:textSize="12sp"
+                android:textColor="@color/text_white"
+                android:background="@drawable/metric_card_bg"
+                android:padding="10dp"
+                android:layout_marginTop="6dp" />
+
+            <!-- Weather Metric Row -->
+            <TextView
+                android:id="@+id/tv_pc_weather"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="🌤️ Weather: Loading..."
+                android:textSize="12sp"
+                android:textColor="@color/accent_cyan"
+                android:background="@drawable/metric_card_bg"
+                android:padding="10dp"
+                android:layout_marginTop="6dp" />
+
+            <!-- Remote Controls: Lock & Screen View -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="12dp">
+
+                <Button
+                    android:id="@+id/btn_lock_laptop_action"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_weight="1"
+                    android:text="🔒 Lock Screen"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text_white"
+                    android:background="@drawable/btn_deny"
+                    android:layout_marginEnd="4dp" />
+
+                <Button
+                    android:id="@+id/btn_screenshot_action"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_weight="1"
+                    android:text="📸 Screen View"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text_white"
+                    android:background="@drawable/card_bg"
+                    android:layout_marginStart="4dp" />
+            </LinearLayout>
+
+            <!-- Storage Actions: Browse & Search -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="6dp">
+
+                <Button
+                    android:id="@+id/btn_browse_laptop_action"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_weight="1"
+                    android:text="📁 Browse Storage"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text_white"
+                    android:background="@drawable/card_bg"
+                    android:layout_marginEnd="4dp" />
+
+                <Button
+                    android:id="@+id/btn_search_files_action"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_weight="1"
+                    android:text="🔍 Search Files"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text_white"
+                    android:background="@drawable/card_bg"
+                    android:layout_marginStart="4dp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Quick Actions & Tools Card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/card_bg"
+            android:padding="16dp"
+            android:layout_marginBottom="14dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="🚀 QUICK ACTIONS &amp; TOOLS"
                     android:textSize="11sp"
                     android:textStyle="bold"
                     android:textColor="@color/accent_cyan" />
@@ -385,11 +429,12 @@
                     android:background="@drawable/badge_remote"
                     android:paddingStart="8dp"
                     android:paddingEnd="8dp"
-                    android:paddingTop="2dp"
-                    android:paddingBottom="2dp"
+                    android:paddingTop="3dp"
+                    android:paddingBottom="3dp"
                     android:visibility="gone" />
             </LinearLayout>
 
+            <!-- Send File (Prominent Primary Action) -->
             <Button
                 android:id="@+id/btn_send_file_to_pc"
                 android:layout_width="match_parent"
@@ -401,6 +446,7 @@
                 android:background="@drawable/btn_approve"
                 android:layout_marginTop="12dp" />
 
+            <!-- Clipboard Actions -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -410,7 +456,7 @@
                 <Button
                     android:id="@+id/btn_send_clip_to_pc"
                     android:layout_width="0dp"
-                    android:layout_height="40dp"
+                    android:layout_height="42dp"
                     android:layout_weight="1"
                     android:text="📋 Copy to PC"
                     android:textSize="12sp"
@@ -421,7 +467,7 @@
                 <Button
                     android:id="@+id/btn_get_clip_from_pc"
                     android:layout_width="0dp"
-                    android:layout_height="40dp"
+                    android:layout_height="42dp"
                     android:layout_weight="1"
                     android:text="📋 Paste from PC"
                     android:textSize="12sp"
@@ -430,46 +476,89 @@
                     android:layout_marginStart="4dp" />
             </LinearLayout>
 
+            <!-- Ring Laptop Action -->
+            <Button
+                android:id="@+id/btn_ring_pc"
+                android:layout_width="match_parent"
+                android:layout_height="42dp"
+                android:text="🔔 Ring Laptop (Alarm)"
+                android:textSize="12sp"
+                android:textColor="@color/text_white"
+                android:background="@drawable/card_bg"
+                android:layout_marginTop="8dp" />
+
+            <!-- LAN-Only Features Container (Automatically Collapses on Internet) -->
             <LinearLayout
+                android:id="@+id/layout_lan_features"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginTop="8dp">
-
-                <Button
-                    android:id="@+id/btn_ring_pc"
-                    android:layout_width="0dp"
-                    android:layout_height="42dp"
-                    android:layout_weight="1"
-                    android:text="🔔 Ring Laptop"
-                    android:textSize="12sp"
-                    android:textColor="@color/text_white"
-                    android:background="@drawable/card_bg"
-                    android:layout_marginEnd="4dp" />
+                android:orientation="vertical">
 
                 <Button
                     android:id="@+id/btn_camera_view"
-                    android:layout_width="0dp"
-                    android:layout_height="42dp"
-                    android:layout_weight="1"
-                    android:text="📹 PC Camera"
+                    android:layout_width="match_parent"
+                    android:layout_height="44dp"
+                    android:text="📹 PC Camera Live Stream"
                     android:textSize="12sp"
                     android:textStyle="bold"
                     android:textColor="@color/text_white"
                     android:background="@drawable/card_bg"
-                    android:layout_marginStart="4dp" />
+                    android:layout_marginTop="8dp" />
+
+                <Button
+                    android:id="@+id/btn_remote_trackpad"
+                    android:layout_width="match_parent"
+                    android:layout_height="46dp"
+                    android:text="🖱️ Trackpad &amp; Laser Remote"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text_white"
+                    android:background="@drawable/card_bg"
+                    android:layout_marginTop="8dp" />
             </LinearLayout>
 
-            <Button
-                android:id="@+id/btn_remote_trackpad"
+            <!-- Dynamic Internet Notice Banner (Visible when on Internet) -->
+            <LinearLayout
+                android:id="@+id/layout_lan_notice"
                 android:layout_width="match_parent"
-                android:layout_height="46dp"
-                android:text="🖱️ Trackpad &amp; Laser"
-                android:textSize="13sp"
-                android:textStyle="bold"
-                android:textColor="@color/text_white"
-                android:background="@drawable/card_bg"
-                android:layout_marginTop="8dp" />
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/badge_remote"
+                android:padding="12dp"
+                android:layout_marginTop="10dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🌐"
+                    android:textSize="22sp"
+                    android:layout_marginEnd="10dp" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Internet Tunnel Active"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/accent_cyan" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Trackpad and Camera stream are local Wi-Fi only and automatically paused."
+                        android:textSize="11sp"
+                        android:textColor="@color/text_muted"
+                        android:layout_marginTop="2dp" />
+                </LinearLayout>
+            </LinearLayout>
         </LinearLayout>
 
         <!-- Media Player Remote Card -->
@@ -480,7 +569,7 @@
             android:orientation="vertical"
             android:background="@drawable/card_bg"
             android:padding="16dp"
-            android:layout_marginBottom="16dp">
+            android:layout_marginBottom="14dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -593,7 +682,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:layout_marginBottom="16dp">
+            android:layout_marginBottom="14dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -620,7 +709,7 @@
                     android:textColor="@color/text_muted" />
             </LinearLayout>
 
-            <!-- Buttons: Auto Scan & Add Manually -->
+            <!-- Buttons: Auto Scan (dynamic) & Add Manually -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -668,7 +757,6 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical" />
-
         </LinearLayout>
 
         <!-- Idle Status Card -->
@@ -699,7 +787,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Tap 'Select' on any laptop above to switch which PC to approve. When screen locks, an approval prompt appears instantly."
+                android:text="When laptop screen locks or requests approval, an instant prompt appears here."
                 android:textSize="12sp"
                 android:textColor="@color/text_muted"
                 android:gravity="center"
