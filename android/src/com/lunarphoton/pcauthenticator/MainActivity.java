@@ -104,7 +104,6 @@ public class MainActivity extends Activity {
     private Button btnScreenshotAction;
     private Button btnBrowseLaptopAction;
     private Button btnSearchFilesAction;
-    private Button btnPhoneScreenOff;
     private boolean isPcCurrentlyLocked = false;
     private Bitmap currentScreenshotBitmap = null;
     private String currentBrowsePath = "shortcuts";
@@ -247,10 +246,6 @@ public class MainActivity extends Activity {
         btnSettings = findViewById(R.id.btn_settings);
         if (btnSettings != null) {
             btnSettings.setOnClickListener(v -> showSettingsDialog());
-        }
-        btnPhoneScreenOff = findViewById(R.id.btn_phone_screen_off);
-        if (btnPhoneScreenOff != null) {
-            btnPhoneScreenOff.setOnClickListener(v -> ScreenOffHelper.requestTurnScreenOff(MainActivity.this));
         }
         updateApproveButtonText();
 
