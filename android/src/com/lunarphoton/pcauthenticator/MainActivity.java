@@ -231,6 +231,10 @@ public class MainActivity extends Activity {
                     lockPc();
                 }
             });
+            btnLockLaptopAction.setOnLongClickListener(v -> {
+                showChangePasswordDialog(null);
+                return true;
+            });
         }
         if (btnScreenshotAction != null) {
             btnScreenshotAction.setOnClickListener(v -> showScreenshotDialog());
@@ -1027,8 +1031,83 @@ public class MainActivity extends Activity {
             }
         }
 
+        TextView tvPwdDesc = dialogView.findViewById(R.id.tv_dialog_password_desc);
+        Button btnChangePwd = dialogView.findViewById(R.id.btn_dialog_change_password);
+
+        Runnable updatePwdStatus = () -> {
+            String saved = prefs.getString("saved_laptop_password", null);
+            if (saved != null && !saved.isEmpty()) {
+                if (tvPwdDesc != null) tvPwdDesc.setText("Password saved (Fingerprint unlock active)");
+                if (btnChangePwd != null) btnChangePwd.setText("Change");
+            } else {
+                if (tvPwdDesc != null) tvPwdDesc.setText("No password saved");
+                if (btnChangePwd != null) btnChangePwd.setText("Set Password");
+            }
+        };
+
+        updatePwdStatus.run();
+
+        if (btnChangePwd != null) {
+            btnChangePwd.setOnClickListener(v -> showChangePasswordDialog(updatePwdStatus));
+        }
+
         builder.setPositiveButton("Done", null);
         builder.show();
+    }
+
+    private void showChangePasswordDialog(Runnable onUpdated) {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("🔑 Saved Laptop Password");
+
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(60, 30, 60, 10);
+
+        TextView tvHint = new TextView(this);
+        tvHint.setText("Enter your laptop login password. It is stored securely on your phone to allow one-tap fingerprint screen unlock.");
+        tvHint.setTextColor(Color.parseColor("#d8dee9"));
+        tvHint.setTextSize(13);
+        layout.addView(tvHint);
+
+        EditText etPassword = new EditText(this);
+        etPassword.setHint("Laptop password");
+        etPassword.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        etPassword.setTextColor(Color.WHITE);
+        etPassword.setHintTextColor(Color.parseColor("#4c566a"));
+
+        SharedPreferences prefs = getSharedPreferences("pc_auth_prefs", Context.MODE_PRIVATE);
+        String currentPwd = prefs.getString("saved_laptop_password", null);
+        if (currentPwd != null && !currentPwd.isEmpty()) {
+            etPassword.setText(currentPwd);
+            etPassword.setSelection(currentPwd.length());
+        }
+        layout.addView(etPassword);
+
+        builder.setView(layout);
+        builder.setPositiveButton("Save", (dialog, which) -> {
+            String newPwd = etPassword.getText().toString().trim();
+            if (newPwd.isEmpty()) {
+                Toast.makeText(MainActivity.this, "Password cannot be empty", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            prefs.edit().putString("saved_laptop_password", newPwd).apply();
+            Toast.makeText(MainActivity.this, "✅ Saved laptop password updated!", Toast.LENGTH_SHORT).show();
+            if (onUpdated != null) onUpdated.run();
+        });
+
+        if (currentPwd != null && !currentPwd.isEmpty()) {
+            builder.setNeutralButton("Remove", (dialog, which) -> {
+                prefs.edit().remove("saved_laptop_password").apply();
+                Toast.makeText(MainActivity.this, "🗑️ Saved password removed", Toast.LENGTH_SHORT).show();
+                if (onUpdated != null) onUpdated.run();
+            });
+        }
+
+        builder.setNegativeButton("Cancel", null);
+
+        AlertDialog dialog = builder.create();
+        dialog.show();
+        etPassword.requestFocus();
     }
 
     private void updateApproveButtonText() {
@@ -1536,13 +1615,26 @@ public class MainActivity extends Activity {
         etPassword.setHintTextColor(Color.parseColor("#4c566a"));
         layout.addView(etPassword);
 
+        SharedPreferences prefs = getSharedPreferences("pc_auth_prefs", Context.MODE_PRIVATE);
+        String savedPwd = prefs.getString("saved_laptop_password", null);
+
         CheckBox cbRemember = new CheckBox(this);
-        cbRemember.setText("Save password for fingerprint unlock");
+        cbRemember.setText(savedPwd != null && !savedPwd.isEmpty() ? "Update saved password for fingerprint unlock" : "Save password for fingerprint unlock");
         cbRemember.setTextColor(Color.parseColor("#d8dee9"));
         cbRemember.setTextSize(12);
         cbRemember.setChecked(true);
         if (isBiometricRequiredAndSupported()) {
             layout.addView(cbRemember);
+        }
+
+        TextView tvManage = null;
+        if (savedPwd != null && !savedPwd.isEmpty()) {
+            tvManage = new TextView(this);
+            tvManage.setText("⚙️ Manage or change saved password");
+            tvManage.setTextColor(Color.parseColor("#88c0d0"));
+            tvManage.setTextSize(12);
+            tvManage.setPadding(0, 16, 0, 4);
+            layout.addView(tvManage);
         }
 
         builder.setView(layout);
@@ -1556,8 +1648,7 @@ public class MainActivity extends Activity {
                 promptBiometricForUnlock(pwd, cbRemember.isChecked());
             } else {
                 if (cbRemember.isChecked()) {
-                    getSharedPreferences("pc_auth_prefs", Context.MODE_PRIVATE)
-                            .edit().putString("saved_laptop_password", pwd).apply();
+                    prefs.edit().putString("saved_laptop_password", pwd).apply();
                 }
                 executeUnlockPc(pwd);
             }
@@ -1565,6 +1656,12 @@ public class MainActivity extends Activity {
         builder.setNegativeButton("Cancel", null);
 
         AlertDialog dialog = builder.create();
+        if (tvManage != null) {
+            tvManage.setOnClickListener(v -> {
+                dialog.dismiss();
+                showChangePasswordDialog(null);
+            });
+        }
         dialog.show();
         etPassword.requestFocus();
     }
