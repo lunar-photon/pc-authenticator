@@ -3076,11 +3076,11 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
                     except Exception:
                         pass
 
-        # 4. Stream loop with keepalive
+        # 4. Stream loop with battery-conserving keepalive (45s)
         try:
             while True:
                 try:
-                    msg = q.get(timeout=15)
+                    msg = q.get(timeout=45)
                     self.wfile.write(msg.encode('utf-8'))
                     self.wfile.flush()
                 except queue.Empty:

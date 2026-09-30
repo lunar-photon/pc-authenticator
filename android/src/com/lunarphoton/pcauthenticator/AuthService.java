@@ -134,21 +134,32 @@ public class AuthService extends Service {
             }
         }, unlockFilter);
 
-        // Automatic battery & charging status reporting
+        // Automatic battery & charging status reporting (throttled to preserve battery)
         IntentFilter batteryFilter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
         registerReceiver(new BroadcastReceiver() {
             private int lastReportedLevel = -1;
             private boolean lastReportedCharging = false;
+            private long lastReportTime = 0;
             @Override
             public void onReceive(Context context, Intent intent) {
+                // If not actively connected to laptop, skip transmission entirely
+                if (currentConn == null) return;
+
                 int rawLevel = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
                 int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
                 int status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
                 boolean isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL;
                 int level = (rawLevel >= 0 && scale > 0) ? (rawLevel * 100) / scale : -1;
-                if (level != lastReportedLevel || isCharging != lastReportedCharging) {
+
+                long now = System.currentTimeMillis();
+                boolean chargingChanged = (isCharging != lastReportedCharging);
+                boolean levelSignificant = (lastReportedLevel < 0 || Math.abs(level - lastReportedLevel) >= 5);
+                boolean intervalElapsed = (now - lastReportTime > 900000L); // 15 min
+
+                if (chargingChanged || (levelSignificant && (now - lastReportTime > 60000L)) || intervalElapsed) {
                     lastReportedLevel = level;
                     lastReportedCharging = isCharging;
+                    lastReportTime = now;
                     PairedDevice active = DeviceManager.getActiveDevice(AuthService.this);
                     if (active != null) {
                         sendPhoneStatusToPc(active);
@@ -203,6 +214,7 @@ public class AuthService extends Service {
             try {
                 udpSock = new DatagramSocket(1760);
                 udpSock.setReuseAddress(true);
+                udpSock.setSoTimeout(30000);
                 byte[] buf = new byte[1024];
                 while (isRunning) {
                     try {
@@ -277,7 +289,7 @@ public class AuthService extends Service {
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("GET");
         conn.setConnectTimeout(connectTimeoutMs);
-        conn.setReadTimeout(60000); // 60s read timeout
+        conn.setReadTimeout(120000); // 120s read timeout (comfortably matches 45s daemon keepalive)
         conn.setRequestProperty("Accept", "application/x-ndjson");
         NetworkUtils.applyTunnelHeaders(conn);
         if (active.isPaired()) {
@@ -429,23 +441,6 @@ public class AuthService extends Service {
                     updateForegroundNotification("Searching for laptop...");
                 }
 
-                // If on local Wi-Fi and failed twice, discover devices
-                if (!isSwitchingNetwork && wifiActive && (consecutiveFails == 2 || consecutiveFails == 6 || (consecutiveFails > 6 && consecutiveFails % 20 == 0))) {
-                    DeviceManager.discoverDevices(this, new DeviceManager.DiscoveryCallback() {
-                        @Override
-                        public void onDiscovered(PairedDevice device) {
-                            PairedDevice activeDev = DeviceManager.getActiveDevice(AuthService.this);
-                            if (activeDev != null && ((device.deviceId != null && device.deviceId.equals(activeDev.deviceId)) || device.hostname.equalsIgnoreCase(activeDev.hostname)) && !device.ip.equals(activeDev.ip)) {
-                                Log.i(TAG, "Auto-discovered laptop at new IP: " + device.ip);
-                                DeviceManager.addOrUpdateDevice(AuthService.this, device);
-                                abortCurrentConnectionAndWake();
-                            }
-                        }
-
-                        @Override
-                        public void onFinished(List<PairedDevice> allFound) {}
-                    });
-                }
             } finally {
                 if (conn != null) {
                     try { conn.disconnect(); } catch (Exception ignored) {}
@@ -460,8 +455,26 @@ public class AuthService extends Service {
                     consecutiveFails = 0;
                 } else {
                     try {
-                        // Exponential backoff: 1s -> 2s -> 4s -> 8s max
-                        long backoff = (consecutiveFails <= 0) ? 1000L : Math.min(8000L, 1000L * (1L << Math.min(consecutiveFails - 1, 3)));
+                        // Adaptive battery-conserving backoff:
+                        // Immediate recovery for transient network drops: 1s, 3s, 8s
+                        // Extended low-power idle when PC is offline: 15s, 30s, 60s, capping at 90s max.
+                        // Instant wakeup: Network changes (Wi-Fi, 4G) or UI foreground immediately wake with 0ms delay.
+                        long backoff;
+                        if (consecutiveFails <= 1) {
+                            backoff = 1000L;
+                        } else if (consecutiveFails == 2) {
+                            backoff = 3000L;
+                        } else if (consecutiveFails == 3) {
+                            backoff = 8000L;
+                        } else if (consecutiveFails == 4) {
+                            backoff = 15000L;
+                        } else if (consecutiveFails == 5) {
+                            backoff = 30000L;
+                        } else if (consecutiveFails < 10) {
+                            backoff = 60000L;
+                        } else {
+                            backoff = 90000L;
+                        }
                         Thread.sleep(backoff);
                     } catch (InterruptedException e) {
                         isSwitchingNetwork = false;

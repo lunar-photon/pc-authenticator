@@ -2744,7 +2744,12 @@ public class MainActivity extends Activity {
         fetchMediaStatus();
         fetchLaptopStatus();
 
-        // Start periodic check while activity is in foreground
+        // Immediately wake connection if sleeping on backoff
+        try {
+            startService(new Intent(this, AuthService.class).setAction(AuthService.ACTION_RECONNECT));
+        } catch (Exception ignored) {}
+
+        // Start battery-efficient periodic check while activity is in foreground (4.5s)
         pollRunnable = new Runnable() {
             private int statusCounter = 0;
             @Override
@@ -2755,10 +2760,10 @@ public class MainActivity extends Activity {
                 if (statusCounter % 2 == 0) {
                     fetchLaptopStatus();
                 }
-                pollHandler.postDelayed(this, 2500);
+                pollHandler.postDelayed(this, 4500);
             }
         };
-        pollHandler.postDelayed(pollRunnable, 2500);
+        pollHandler.postDelayed(pollRunnable, 4500);
     }
 
     @Override
