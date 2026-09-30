@@ -703,6 +703,18 @@ class PhoneInfoWindow(QWidget):
         btn_grid2.addWidget(self.btn_refresh)
         layout.addLayout(btn_grid2)
 
+        # 4. Paired Devices Section
+        devices_header = QLabel("📱 PAIRED DEVICES")
+        devices_header.setStyleSheet("font-size: 11px; font-weight: bold; color: #88c0d0; padding-left: 2px; padding-top: 6px;")
+        layout.addWidget(devices_header)
+
+        self.paired_card = QWidget()
+        self.paired_card.setStyleSheet("background-color: #242933; border: 1px solid #3b4252; border-radius: 10px;")
+        self.paired_card_layout = QVBoxLayout(self.paired_card)
+        self.paired_card_layout.setContentsMargins(14, 12, 14, 12)
+        self.paired_card_layout.setSpacing(10)
+        layout.addWidget(self.paired_card)
+
         layout.addStretch()
 
     def refresh_data(self):
@@ -791,6 +803,68 @@ class PhoneInfoWindow(QWidget):
         else:
             seen_str = "Never"
         self.sync_detail.setText(f"🕒 Last Active: {seen_str} • 🔐 Encryption: HMAC-SHA256")
+
+        # Populate Paired Devices
+        while self.paired_card_layout.count():
+            item = self.paired_card_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+            elif item.layout():
+                sub = item.layout()
+                while sub.count():
+                    si = sub.takeAt(0)
+                    if si.widget():
+                        si.widget().deleteLater()
+
+        devices = st.get("devices", [])
+        if devices:
+            for dev in devices:
+                d_name = dev.get("client_name", "Android Phone")
+                d_ip = dev.get("ip", "Unknown IP")
+                is_conn = dev.get("connected", False)
+
+                dev_row = QHBoxLayout()
+                dev_lbl = QLabel(f"📱 {d_name} ({d_ip})")
+                dev_lbl.setStyleSheet("color: #eceff4; font-size: 13px; font-weight: bold; background: transparent; border: none;")
+                dev_row.addWidget(dev_lbl)
+
+                badge = QLabel("🟢 Connected" if is_conn else "⚪ Idle")
+                badge_style = "background-color: #2e4338; color: #a3be8c;" if is_conn else "background-color: #3b4252; color: #d8dee9;"
+                badge.setStyleSheet(f"{badge_style} border-radius: 8px; padding: 2px 8px; font-size: 11px; font-weight: bold;")
+                dev_row.addWidget(badge)
+                dev_row.addStretch()
+
+                btn_unpair = QPushButton("🗑️ Unpair")
+                btn_unpair.setStyleSheet("background-color: #4c1d24; color: #ff8080; border: 1px solid #73232c; border-radius: 6px; padding: 4px 10px; font-weight: bold;")
+                btn_unpair.clicked.connect(lambda checked=False, d=dev: self.unpair_device_action(d))
+                dev_row.addWidget(btn_unpair)
+
+                self.paired_card_layout.addLayout(dev_row)
+        else:
+            no_lbl = QLabel("No paired devices found")
+            no_lbl.setStyleSheet("color: #d8dee9; font-size: 12px; background: transparent; border: none;")
+            self.paired_card_layout.addWidget(no_lbl)
+
+        btn_add_pair = QPushButton("➕ Pair New Device...")
+        btn_add_pair.setStyleSheet("background-color: #3b4252; color: #88c0d0; border-radius: 6px; padding: 6px; font-weight: bold; margin-top: 4px;")
+        btn_add_pair.clicked.connect(lambda: subprocess.Popen(["pc-auth", "--pair"]))
+        self.paired_card_layout.addWidget(btn_add_pair)
+
+    def unpair_device_action(self, dev):
+        name = dev.get('client_name', 'Device')
+        ret = QMessageBox.question(
+            self,
+            "Unpair Device",
+            f"Are you sure you want to unpair {name}?\n\nThis will disconnect the device and revoke its pairing credentials.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if ret == QMessageBox.StandardButton.Yes:
+            post_json("/api/devices/unpair", {"token": dev.get('token'), "client_id": dev.get('client_id')})
+            self.refresh_data()
+            if self.parent_tray:
+                self.parent_tray.build_menu()
+                self.parent_tray.update_status()
+            QMessageBox.information(self, "Unpaired", f"{name} was unpaired successfully.")
 
     def on_browse(self):
         if self.parent_tray:
@@ -885,6 +959,34 @@ class PCConnectTrayApp:
         act_view_info = self.menu.addAction("📱 View Phone Details & Status...")
         act_view_info.triggered.connect(self.show_phone_info)
 
+        # Paired Devices Submenu
+        st_dev = fetch_json("/api/phone/status")
+        dev_list = st_dev.get('devices', []) if isinstance(st_dev, dict) else []
+
+        menu_paired = self.menu.addMenu(f"📱 Paired Devices ({len(dev_list)})")
+        if dev_list:
+            for dev in dev_list:
+                d_name = dev.get('client_name', 'Android Phone')
+                d_ip = dev.get('ip', 'Unknown IP')
+                d_conn = "🟢" if dev.get('connected') else "⚪"
+                
+                dev_submenu = menu_paired.addMenu(f"{d_conn} {d_name} ({d_ip})")
+                act_dev_info = dev_submenu.addAction(f"ℹ️ View {d_name} Details...")
+                act_dev_info.triggered.connect(self.show_phone_info)
+                
+                act_dev_send = dev_submenu.addAction("📤 Send File to Device...")
+                act_dev_send.triggered.connect(lambda checked=False, d=dev: self.send_file_to_device(d))
+                
+                act_dev_unpair = dev_submenu.addAction("🗑️ Unpair Device...")
+                act_dev_unpair.triggered.connect(lambda checked=False, d=dev: self.confirm_unpair_device(d))
+        else:
+            act_no = menu_paired.addAction("No paired devices found")
+            act_no.setEnabled(False)
+
+        menu_paired.addSeparator()
+        act_sub_pair = menu_paired.addAction("➕ Pair New Device...")
+        act_sub_pair.triggered.connect(lambda: subprocess.Popen(["pc-auth", "--pair"]))
+
         self.menu.addSeparator()
 
         act_browse = self.menu.addAction("📂 Browse Phone Files...")
@@ -917,6 +1019,29 @@ class PCConnectTrayApp:
 
         act_quit = self.menu.addAction("🚪 Exit PC Connect")
         act_quit.triggered.connect(self.app.quit)
+
+    def confirm_unpair_device(self, device):
+        name = device.get('client_name', 'this device')
+        ret = QMessageBox.question(
+            None,
+            "Unpair Device",
+            f"Are you sure you want to unpair {name}?\n\nThis will disconnect the device and revoke its security credentials.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if ret == QMessageBox.StandardButton.Yes:
+            post_json("/api/devices/unpair", {"token": device.get('token'), "client_id": device.get('client_id')})
+            self.build_menu()
+            self.update_status()
+            if self.info_window:
+                self.info_window.refresh_data()
+            QMessageBox.information(None, "Device Unpaired", f"{name} has been unpaired.")
+
+    def send_file_to_device(self, device):
+        files, _ = QFileDialog.getOpenFileNames(None, f"Send Files to {device.get('client_name')}")
+        if files:
+            send_bin = os.path.expanduser("~/.local/bin/pc-connect-send")
+            cid = device.get('client_id') or device.get('token')
+            subprocess.Popen([send_bin, "--device", cid] + files)
 
     def update_status(self):
         st = fetch_json("/api/phone/status")

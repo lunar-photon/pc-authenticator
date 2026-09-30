@@ -123,6 +123,141 @@
                 android:layout_marginTop="12dp" />
         </LinearLayout>
 
+        <!-- Laptop Live Status & Remote Controls Card -->
+        <LinearLayout
+            android:id="@+id/layout_laptop_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/card_bg"
+            android:padding="16dp"
+            android:layout_marginBottom="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="💻 LAPTOP LIVE STATUS"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/accent_cyan" />
+
+                <TextView
+                    android:id="@+id/tv_pc_lock_badge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🔓 Unlocked"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/status_green" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="10dp">
+
+                <TextView
+                    android:id="@+id/tv_pc_battery"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="🔋 Battery: --%"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_white" />
+
+                <TextView
+                    android:id="@+id/tv_pc_uptime"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="⏱️ Uptime: --"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_muted" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="6dp">
+
+                <TextView
+                    android:id="@+id/tv_pc_cpu"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="📊 CPU: --%"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_white" />
+
+                <TextView
+                    android:id="@+id/tv_pc_memory"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="💾 RAM: --"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_muted" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tv_pc_weather"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="🌤️ Weather: Loading..."
+                android:textSize="12sp"
+                android:textColor="@color/accent_cyan"
+                android:layout_marginTop="8dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="12dp">
+
+                <Button
+                    android:id="@+id/btn_lock_laptop_action"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:text="🔒 Lock Screen"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text_white"
+                    android:background="@drawable/btn_deny"
+                    android:layout_marginEnd="4dp" />
+
+                <Button
+                    android:id="@+id/btn_screenshot_action"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:text="📸 Screen View"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text_white"
+                    android:background="@drawable/card_bg"
+                    android:layout_marginEnd="4dp" />
+
+                <Button
+                    android:id="@+id/btn_search_files_action"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:text="🔍 Search Files"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text_white"
+                    android:background="@drawable/card_bg" />
+            </LinearLayout>
+        </LinearLayout>
+
         <!-- Active Challenge Card -->
         <LinearLayout
             android:id="@+id/layout_challenge"

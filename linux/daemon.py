@@ -136,6 +136,353 @@ def get_local_ip():
         return '127.0.0.1'
 
 # ==========================================
+# Dolphin Dynamic Service Menu Helpers
+# ==========================================
+
+def update_dolphin_servicemenu():
+    try:
+        cfg = load_config()
+        paired = cfg.get('paired_clients', {})
+        
+        valid_clients = []
+        for token, client in paired.items():
+            cid = client.get('client_id') or token
+            if cid == "phone-auto-test" and len(paired) > 1:
+                continue
+            name = client.get('client_name') or 'Android Phone'
+            valid_clients.append({"token": token, "client_id": cid, "name": name})
+
+        desktop_path = os.path.expanduser('~/.local/share/kio/servicemenus/pc_connect.desktop')
+        repo_path = os.path.join(BASE_DIR, 'pc_connect.desktop')
+        os.makedirs(os.path.dirname(desktop_path), exist_ok=True)
+
+        if len(valid_clients) == 1:
+            dev_name = valid_clients[0]['name']
+            content = f"""[Desktop Entry]
+Type=Service
+ServiceTypes=KonqPopupMenu/Plugin
+X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+MimeType=all/all;all/allfiles;inode/directory;application/octet-stream;
+Actions=sendToDevice;
+X-KDE-Priority=TopLevel
+X-KDE-Submenu={dev_name}
+
+[Desktop Action sendToDevice]
+Name=Send to {dev_name}
+Icon=smartphone
+Exec=/home/lunarphoton/.local/bin/pc-connect-send %U
+"""
+        elif len(valid_clients) > 1:
+            actions_list = ";".join([f"sendDevice{i}" for i in range(len(valid_clients))]) + ";"
+            actions_blocks = []
+            for i, c in enumerate(valid_clients):
+                actions_blocks.append(f"""[Desktop Action sendDevice{i}]
+Name=Send to {c['name']}
+Icon=smartphone
+Exec=/home/lunarphoton/.local/bin/pc-connect-send --device "{c['client_id']}" %U
+""")
+            content = f"""[Desktop Entry]
+Type=Service
+ServiceTypes=KonqPopupMenu/Plugin
+X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+MimeType=all/all;all/allfiles;inode/directory;application/octet-stream;
+Actions={actions_list}
+X-KDE-Priority=TopLevel
+X-KDE-Submenu=PC Connect
+
+""" + "\n".join(actions_blocks)
+        else:
+            content = """[Desktop Entry]
+Type=Service
+ServiceTypes=KonqPopupMenu/Plugin
+X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+MimeType=all/all;all/allfiles;inode/directory;application/octet-stream;
+Actions=sendViaPCConnect;
+X-KDE-Priority=TopLevel
+X-KDE-Submenu=PC Connect
+
+[Desktop Action sendViaPCConnect]
+Name=Send via PC Connect
+Icon=smartphone
+Exec=/home/lunarphoton/.local/bin/pc-connect-send %U
+"""
+        with open(desktop_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        try:
+            with open(repo_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+        except Exception:
+            pass
+        try:
+            subprocess.run(['kbuildsycoca6'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+        except Exception:
+            pass
+    except Exception as e:
+        sys.stderr.write(f"update_dolphin_servicemenu error: {e}\n")
+
+def unpair_device(target_identifier):
+    cfg = load_config()
+    paired = cfg.get('paired_clients', {})
+    found_tokens = []
+    device_name = "Android Phone"
+    for tok, client in list(paired.items()):
+        cid = client.get('client_id')
+        if tok == target_identifier or cid == target_identifier or client.get('ip') == target_identifier:
+            found_tokens.append(tok)
+            device_name = client.get('client_name', device_name)
+
+    if not found_tokens:
+        return False, "Device not found"
+
+    for tok in found_tokens:
+        if tok in paired:
+            del paired[tok]
+    cfg['paired_clients'] = paired
+    save_config(cfg)
+
+    auth_mgr.broadcast_ndjson(json.dumps({"event": "unpaired", "target": target_identifier, "time": int(time.time())}) + "\n")
+
+    if active_phone_state.get('auth_token') in found_tokens or active_phone_state.get('ip') == target_identifier:
+        active_phone_state['ip'] = None
+        active_phone_state['auth_token'] = None
+        active_phone_state['client_name'] = "Android Phone"
+        active_phone_state['battery_level'] = None
+        active_phone_state['last_seen'] = 0
+
+    update_dolphin_servicemenu()
+    try:
+        subprocess.Popen(['notify-send', '-i', 'dialog-warning', '-a', 'PC Connect', 'Device Unpaired', f'{device_name} has been unpaired from this PC.'])
+    except Exception:
+        pass
+    return True, device_name
+
+# ==========================================
+# Laptop Status, Weather & System Helpers
+# ==========================================
+
+_last_cpu_sample = None
+
+def get_cpu_usage_pct():
+    global _last_cpu_sample
+    try:
+        with open('/proc/stat', 'r') as f:
+            line = f.readline()
+        parts = [float(x) for x in line.split()[1:8]]
+        idle = parts[3] + parts[4]
+        total = sum(parts)
+        if _last_cpu_sample:
+            prev_idle, prev_total = _last_cpu_sample
+            idle_delta = idle - prev_idle
+            total_delta = total - prev_total
+            _last_cpu_sample = (idle, total)
+            if total_delta > 0:
+                return max(0.0, min(100.0, round((1.0 - idle_delta / total_delta) * 100.0, 1)))
+        _last_cpu_sample = (idle, total)
+    except Exception:
+        pass
+    return 0.0
+
+def is_pc_locked():
+    try:
+        out = subprocess.check_output(
+            ['qdbus6', 'org.freedesktop.ScreenSaver', '/ScreenSaver', 'org.freedesktop.ScreenSaver.GetActive'],
+            stderr=subprocess.DEVNULL, timeout=2
+        ).decode().strip()
+        if out.lower() == 'true':
+            return True
+        if out.lower() == 'false':
+            return False
+    except Exception:
+        pass
+    try:
+        out = subprocess.check_output(
+            ['loginctl', 'show-session', 'auto', '-p', 'LockedHint'],
+            stderr=subprocess.DEVNULL, timeout=2
+        ).decode().strip()
+        if 'yes' in out.lower():
+            return True
+        if 'no' in out.lower():
+            return False
+    except Exception:
+        pass
+    return False
+
+weather_cache = {"data": None, "timestamp": 0}
+
+def get_weather_cached():
+    global weather_cache
+    now = time.time()
+    if weather_cache["data"] and (now - weather_cache["timestamp"] < 900):
+        return weather_cache["data"]
+    try:
+        req = urllib.request.Request('https://wttr.in/?format=j1', headers={'User-Agent': 'curl/8.0'})
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            cur = data.get('current_condition', [{}])[0]
+            area = data.get('nearest_area', [{}])[0]
+            city = area.get('areaName', [{}])[0].get('value', 'Local Area')
+            temp_c = cur.get('temp_C', '--')
+            desc = cur.get('weatherDesc', [{}])[0].get('value', 'Clear')
+            humidity = cur.get('humidity', '--')
+            feels_like = cur.get('FeelsLikeC', temp_c)
+            parsed = {
+                "city": city,
+                "temp_c": temp_c,
+                "desc": desc,
+                "humidity": humidity,
+                "feels_like_c": feels_like,
+                "cached_at": int(now)
+            }
+            weather_cache["data"] = parsed
+            weather_cache["timestamp"] = now
+            return parsed
+    except Exception:
+        if weather_cache["data"]:
+            return weather_cache["data"]
+        return None
+
+def get_pc_system_status():
+    locked = is_pc_locked()
+
+    import glob
+    bat_info = {"capacity": None, "status": "Unknown", "ac_online": False}
+    for p in glob.glob('/sys/class/power_supply/BAT*'):
+        try:
+            with open(os.path.join(p, 'capacity')) as f:
+                bat_info['capacity'] = int(f.read().strip())
+            with open(os.path.join(p, 'status')) as f:
+                bat_info['status'] = f.read().strip()
+            break
+        except Exception:
+            pass
+
+    for p in glob.glob('/sys/class/power_supply/AC*') + glob.glob('/sys/class/power_supply/ADP*'):
+        try:
+            with open(os.path.join(p, 'online')) as f:
+                bat_info['ac_online'] = (f.read().strip() == '1')
+            break
+        except Exception:
+            pass
+
+    cpu_pct = get_cpu_usage_pct()
+
+    mem_info = {"total_gb": 0, "used_gb": 0, "used_pct": 0}
+    try:
+        mem = {}
+        with open('/proc/meminfo') as f:
+            for line in f:
+                parts = line.split(':')
+                if len(parts) == 2:
+                    mem[parts[0].strip()] = int(parts[1].strip().split()[0])
+        tot_kb = mem.get('MemTotal', 0)
+        avail_kb = mem.get('MemAvailable', 0)
+        used_kb = tot_kb - avail_kb
+        mem_info = {
+            "total_gb": round(tot_kb / 1048576.0, 1),
+            "used_gb": round(used_kb / 1048576.0, 1),
+            "used_pct": round((used_kb / tot_kb) * 100.0, 1) if tot_kb else 0
+        }
+    except Exception:
+        pass
+
+    uptime_info = {"seconds": 0, "formatted": "--"}
+    try:
+        with open('/proc/uptime') as f:
+            up_sec = float(f.read().split()[0])
+        h = int(up_sec // 3600)
+        m = int((up_sec % 3600) // 60)
+        uptime_info = {"seconds": int(up_sec), "formatted": f"{h}h {m}m"}
+    except Exception:
+        pass
+
+    weather = get_weather_cached()
+
+    return {
+        "status": "ok",
+        "hostname": socket.gethostname(),
+        "locked": locked,
+        "battery": bat_info,
+        "cpu": {"usage_pct": cpu_pct},
+        "memory": mem_info,
+        "uptime": uptime_info,
+        "weather": weather
+    }
+
+def capture_pc_screenshot():
+    tmp_out = f"/tmp/pc_screen_{secrets.token_hex(4)}.jpg"
+    try:
+        res = subprocess.run(
+            ['spectacle', '-b', '-n', '-o', tmp_out],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5
+        )
+        if res.returncode == 0 and os.path.exists(tmp_out):
+            with open(tmp_out, 'rb') as f:
+                data = f.read()
+            try:
+                os.remove(tmp_out)
+            except Exception:
+                pass
+            return data
+    except Exception as e:
+        sys.stderr.write(f"capture_pc_screenshot error: {e}\n")
+    if os.path.exists(tmp_out):
+        try: os.remove(tmp_out)
+        except Exception: pass
+    return None
+
+def format_file_size(size_bytes):
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if size_bytes < 1024.0:
+            return f"{size_bytes:.1f} {unit}"
+        size_bytes /= 1024.0
+    return f"{size_bytes:.1f} TB"
+
+def search_laptop_files(query, max_results=50):
+    query = (query or '').strip().lower()
+    if not query:
+        return []
+    base_dirs = [
+        os.path.expanduser('~/Downloads'),
+        os.path.expanduser('~/Documents'),
+        os.path.expanduser('~/Pictures'),
+        os.path.expanduser('~/Videos'),
+        os.path.expanduser('~/Desktop'),
+        os.path.expanduser('~')
+    ]
+    skip_dirs = {'.git', '.cache', 'node_modules', '.venv', '__pycache__', '.local', '.cargo', '.npm', '.rustup', '.gradle'}
+    seen_paths = set()
+    results = []
+
+    for bdir in base_dirs:
+        if not os.path.exists(bdir):
+            continue
+        for root, dirs, files in os.walk(bdir):
+            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in skip_dirs]
+            for fn in files:
+                if fn.startswith('.'):
+                    continue
+                if query in fn.lower():
+                    full_p = os.path.join(root, fn)
+                    if full_p in seen_paths:
+                        continue
+                    seen_paths.add(full_p)
+                    try:
+                        st = os.stat(full_p)
+                        results.append({
+                            "name": fn,
+                            "path": full_p,
+                            "size": st.st_size,
+                            "size_formatted": format_file_size(st.st_size),
+                            "mtime": int(st.st_mtime),
+                            "extension": os.path.splitext(fn)[1].lower()
+                        })
+                    except Exception:
+                        pass
+                    if len(results) >= max_results:
+                        return results
+    return results
+
+# ==========================================
 # KDE Plasma 6 & MPRIS Helpers
 # ==========================================
 
@@ -496,6 +843,41 @@ BTN_LEFT = 0x110
 BTN_RIGHT = 0x111
 BTN_MIDDLE = 0x112
 
+KEY_MAP = {
+    'esc': 1, 'escape': 1,
+    '1': 2, '2': 3, '3': 4, '4': 5, '5': 6, '6': 7, '7': 8, '8': 9, '9': 10, '0': 11,
+    '-': 12, '=': 13, 'backspace': 14, 'bksp': 14,
+    'tab': 15,
+    'q': 16, 'w': 17, 'e': 18, 'r': 19, 't': 20, 'y': 21, 'u': 22, 'i': 23, 'o': 24, 'p': 25,
+    '[': 26, ']': 27, 'enter': 28, 'return': 28,
+    'ctrl': 29, 'leftctrl': 29,
+    'a': 30, 's': 31, 'd': 32, 'f': 33, 'g': 34, 'h': 35, 'j': 36, 'k': 37, 'l': 38,
+    ';': 39, "'": 40, '`': 41,
+    'shift': 42, 'leftshift': 42,
+    '\\': 43,
+    'z': 44, 'x': 45, 'c': 46, 'v': 47, 'b': 48, 'n': 49, 'm': 50,
+    ',': 51, '.': 52, '/': 53,
+    'rightshift': 54,
+    'alt': 56, 'leftalt': 56,
+    'space': 57, ' ': 57,
+    'capslock': 58,
+    'f1': 59, 'f2': 60, 'f3': 61, 'f4': 62, 'f5': 63, 'f6': 64,
+    'f7': 65, 'f8': 66, 'f9': 67, 'f10': 68, 'f11': 87, 'f12': 88,
+    'home': 102, 'up': 103, 'pageup': 104, 'prev': 104,
+    'left': 105, 'right': 106,
+    'end': 107, 'down': 108, 'pagedown': 109, 'next': 109,
+    'insert': 110, 'delete': 111, 'del': 111,
+    'super': 125, 'win': 125, 'meta': 125,
+}
+
+SHIFT_MAP = {
+    '!': (2, True), '@': (3, True), '#': (4, True), '$': (5, True), '%': (6, True),
+    '^': (7, True), '&': (8, True), '*': (9, True), '(': (10, True), ')': (11, True),
+    '_': (12, True), '+': (13, True), '{': (26, True), '}': (27, True), '|': (43, True),
+    ':': (39, True), '"': (40, True), '~': (41, True), '<': (51, True), '>': (52, True),
+    '?': (53, True)
+}
+
 class VirtualMouse:
     def __init__(self):
         self.lock = threading.Lock()
@@ -503,19 +885,25 @@ class VirtualMouse:
         try:
             self.fd = os.open('/dev/uinput', os.O_WRONLY | os.O_NONBLOCK)
             fcntl.ioctl(self.fd, UI_SET_EVBIT, EV_KEY)
-            for btn in (BTN_LEFT, BTN_RIGHT, BTN_MIDDLE, 1, 63, 104, 105, 106, 109, 57, 48, 17):
+            for btn in (BTN_LEFT, BTN_RIGHT, BTN_MIDDLE):
                 fcntl.ioctl(self.fd, UI_SET_KEYBIT, btn)
+            # Register full keyboard keycodes 1..248
+            for keycode in range(1, 249):
+                try:
+                    fcntl.ioctl(self.fd, UI_SET_KEYBIT, keycode)
+                except Exception:
+                    pass
 
             fcntl.ioctl(self.fd, UI_SET_EVBIT, EV_REL)
             for rel in (REL_X, REL_Y, REL_WHEEL, REL_HWHEEL):
                 fcntl.ioctl(self.fd, UI_SET_RELBIT, rel)
 
-            name = b"PC Connect Virtual Mouse".ljust(80, b'\x00')
+            name = b"PC Connect Virtual Input".ljust(80, b'\x00')
             input_id = struct.pack('HHHH', 0x03, 0x1234, 0x5678, 1)
             user_dev = name + input_id + struct.pack('I', 0) + b'\x00' * (64 * 4 * 4)
             os.write(self.fd, user_dev)
             fcntl.ioctl(self.fd, UI_DEV_CREATE)
-            sys.stderr.write("  Virtual Mouse (/dev/uinput) initialized successfully\n")
+            sys.stderr.write("  Virtual Input Keyboard & Mouse (/dev/uinput) initialized successfully\n")
             sys.stderr.flush()
         except Exception as e:
             sys.stderr.write(f"Warning: Cannot initialize /dev/uinput: {e}\n")
@@ -585,24 +973,89 @@ class VirtualMouse:
     def press_key(self, key_name):
         if not self.fd:
             return
-        code_map = {
-            'next': 109,     # Page Down (Next slide)
-            'prev': 104,     # Page Up (Previous slide)
-            'right': 106,
-            'left': 105,
-            'f5': 63,        # Start presentation
-            'esc': 1,        # Exit presentation
-            'space': 57,
-            'b': 48,
-            'w': 17
-        }
-        code = code_map.get(str(key_name).lower())
-        if code:
-            with self.lock:
+        key_str = str(key_name).strip().lower()
+        if not key_str:
+            return
+
+        with self.lock:
+            if '+' in key_str:
+                parts = [p.strip() for p in key_str.split('+')]
+                mod_codes = []
+                for p in parts[:-1]:
+                    if p in ('ctrl', 'control'): mod_codes.append(29)
+                    elif p in ('alt',): mod_codes.append(56)
+                    elif p in ('shift',): mod_codes.append(42)
+                    elif p in ('super', 'win', 'meta'): mod_codes.append(125)
+                last_p = parts[-1]
+                main_code = KEY_MAP.get(last_p)
+                if main_code:
+                    for m in mod_codes:
+                        self.emit(EV_KEY, m, 1)
+                    self.emit(EV_SYN, 0, 0)
+                    self.emit(EV_KEY, main_code, 1)
+                    self.emit(EV_SYN, 0, 0)
+                    self.emit(EV_KEY, main_code, 0)
+                    self.emit(EV_SYN, 0, 0)
+                    for m in reversed(mod_codes):
+                        self.emit(EV_KEY, m, 0)
+                    self.emit(EV_SYN, 0, 0)
+                    return
+
+            code = KEY_MAP.get(key_str)
+            if code:
                 self.emit(EV_KEY, code, 1)
                 self.emit(EV_SYN, 0, 0)
                 self.emit(EV_KEY, code, 0)
                 self.emit(EV_SYN, 0, 0)
+
+    def type_text(self, text):
+        if not self.fd or not text:
+            return
+        with self.lock:
+            for ch in str(text):
+                if ch == '\n':
+                    self.emit(EV_KEY, 28, 1)
+                    self.emit(EV_SYN, 0, 0)
+                    self.emit(EV_KEY, 28, 0)
+                    self.emit(EV_SYN, 0, 0)
+                elif ch == '\t':
+                    self.emit(EV_KEY, 15, 1)
+                    self.emit(EV_SYN, 0, 0)
+                    self.emit(EV_KEY, 15, 0)
+                    self.emit(EV_SYN, 0, 0)
+                elif ch == '\b':
+                    self.emit(EV_KEY, 14, 1)
+                    self.emit(EV_SYN, 0, 0)
+                    self.emit(EV_KEY, 14, 0)
+                    self.emit(EV_SYN, 0, 0)
+                elif ch in SHIFT_MAP:
+                    code, _ = SHIFT_MAP[ch]
+                    self.emit(EV_KEY, 42, 1)
+                    self.emit(EV_SYN, 0, 0)
+                    self.emit(EV_KEY, code, 1)
+                    self.emit(EV_SYN, 0, 0)
+                    self.emit(EV_KEY, code, 0)
+                    self.emit(EV_SYN, 0, 0)
+                    self.emit(EV_KEY, 42, 0)
+                    self.emit(EV_SYN, 0, 0)
+                elif ch.isupper():
+                    lower_code = KEY_MAP.get(ch.lower())
+                    if lower_code:
+                        self.emit(EV_KEY, 42, 1)
+                        self.emit(EV_SYN, 0, 0)
+                        self.emit(EV_KEY, lower_code, 1)
+                        self.emit(EV_SYN, 0, 0)
+                        self.emit(EV_KEY, lower_code, 0)
+                        self.emit(EV_SYN, 0, 0)
+                        self.emit(EV_KEY, 42, 0)
+                        self.emit(EV_SYN, 0, 0)
+                elif ch.lower() in KEY_MAP:
+                    code = KEY_MAP[ch.lower()]
+                    self.emit(EV_KEY, code, 1)
+                    self.emit(EV_SYN, 0, 0)
+                    self.emit(EV_KEY, code, 0)
+                    self.emit(EV_SYN, 0, 0)
+                time.sleep(0.005)
 
     def close(self):
         if self.fd:
@@ -643,12 +1096,13 @@ def start_udp_mouse_listener(port=1762):
                     if mtype == 'move':
                         virtual_mouse.move(payload.get('dx', 0), payload.get('dy', 0))
                     elif mtype == 'pointer':
-                        # Pointer mode: moves the laser dot overlay, does NOT move OS mouse cursor
                         trigger_laser_overlay(payload)
                     elif mtype == 'laser_state':
                         trigger_laser_overlay(payload)
                     elif mtype == 'key':
                         virtual_mouse.press_key(payload.get('key', ''))
+                    elif mtype == 'text':
+                        virtual_mouse.type_text(payload.get('text', ''))
                     elif mtype == 'click':
                         virtual_mouse.click(payload.get('button', 'left'))
                     elif mtype == 'down':
@@ -1006,11 +1460,13 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
                 cid = client.get('client_id') or token
                 if cid == "phone-auto-test" and len(cfg.get('paired_clients', {})) > 1:
                     continue
+                is_active = (active_phone_state.get('auth_token') == token) or (active_phone_state.get('ip') == client.get('ip'))
                 devices_by_id[cid] = {
                     "token": token,
                     "client_id": cid,
                     "client_name": client.get('client_name', 'Android Phone'),
-                    "ip": client.get('ip')
+                    "ip": client.get('ip'),
+                    "connected": bool(is_active and is_connected)
                 }
             device_list = list(devices_by_id.values())
 
@@ -1022,12 +1478,87 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             })
             return
 
+        elif path == '/api/devices':
+            cfg = load_config()
+            is_connected = (time.time() - active_phone_state["last_seen"] < 90) or bool(auth_mgr.ndjson_clients)
+            devices_by_id = {}
+            for token, client in cfg.get('paired_clients', {}).items():
+                cid = client.get('client_id') or token
+                if cid == "phone-auto-test" and len(cfg.get('paired_clients', {})) > 1:
+                    continue
+                is_active = (active_phone_state.get('auth_token') == token) or (active_phone_state.get('ip') == client.get('ip'))
+                devices_by_id[cid] = {
+                    "token": token,
+                    "client_id": cid,
+                    "client_name": client.get('client_name', 'Android Phone'),
+                    "ip": client.get('ip'),
+                    "connected": bool(is_active and is_connected)
+                }
+            self.send_json({"devices": list(devices_by_id.values())})
+            return
+
         elif path == '/api/clipboard':
             self.send_json({"status": "ok", "text": get_kde_clipboard()})
             return
 
         elif path == '/api/media/status':
             self.send_json(get_mpris_status())
+            return
+
+        elif path == '/api/pc/status':
+            self.send_json(get_pc_system_status())
+            return
+
+        elif path == '/api/screen/screenshot':
+            data = capture_pc_screenshot()
+            if data:
+                self.send_response(200)
+                self.send_header('Content-Type', 'image/jpeg')
+                self.send_header('Content-Length', str(len(data)))
+                self.send_header('Content-Disposition', 'inline; filename="pc_screenshot.jpg"')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Cache-Control', 'no-cache, no-store')
+                self.end_headers()
+                self.wfile.write(data)
+            else:
+                self.send_error(500, "Screenshot capture failed")
+            return
+
+        elif path == '/api/weather':
+            w = get_weather_cached()
+            self.send_json({"status": "ok", "weather": w} if w else {"status": "error", "message": "Weather unavailable"})
+            return
+
+        elif path == '/api/files/search':
+            q = qs.get('q', [''])[0]
+            results = search_laptop_files(q)
+            self.send_json({"status": "ok", "query": q, "count": len(results), "results": results})
+            return
+
+        elif path == '/api/files/download_pc':
+            req_path = unquote(qs.get('path', [''])[0])
+            req_path = os.path.realpath(os.path.expanduser(req_path))
+            home = os.path.expanduser('~')
+            if not req_path.startswith(home) or not os.path.exists(req_path) or os.path.isdir(req_path):
+                self.send_error(403, "Forbidden or file not found")
+                return
+            try:
+                fn = os.path.basename(req_path)
+                size = os.path.getsize(req_path)
+                ctype, _ = mimetypes.guess_type(fn)
+                ctype = ctype or 'application/octet-stream'
+                self.send_response(200)
+                self.send_header('Content-Type', ctype)
+                self.send_header('Content-Length', str(size))
+                self.send_header('Content-Disposition', f'attachment; filename="{quote(fn)}"')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                with open(req_path, 'rb') as f:
+                    while chunk := f.read(65536):
+                        self.wfile.write(chunk)
+            except Exception as e:
+                try: self.send_error(500, str(e))
+                except Exception: pass
             return
 
         # 6. File Staging Download (PC to Phone pull)
@@ -1303,6 +1834,7 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
                     "ip": self.client_address[0]
                 }
                 save_config(cfg)
+                update_dolphin_servicemenu()
                 active_phone_state['ip'] = self.client_address[0]
                 active_phone_state['client_name'] = client_name
                 active_phone_state['auth_token'] = auth_token
@@ -1568,7 +2100,7 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             else:
                 self.send_json({"error": "invalid_url", "message": "URL must start with http:// or https://"}, status=400)
 
-        # 13. Virtual Mouse / Trackpad (HTTP fallback)
+        # 13. Virtual Mouse & Keyboard / Trackpad (HTTP fallback)
         elif path == '/api/mouse':
             cfg = load_config()
             client_info, token = authenticate_client(self, cfg)
@@ -1584,6 +2116,8 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
                 trigger_laser_overlay(body)
             elif mtype == 'key':
                 virtual_mouse.press_key(body.get('key', ''))
+            elif mtype == 'text':
+                virtual_mouse.type_text(body.get('text', ''))
             elif mtype == 'click':
                 virtual_mouse.click(body.get('button', 'left'))
             elif mtype == 'down':
@@ -1593,6 +2127,42 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             elif mtype == 'scroll':
                 virtual_mouse.scroll(body.get('dy', 0), body.get('dx', 0))
             self.send_json({"status": "ok"})
+
+        elif path == '/api/keyboard/text':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
+            text = body.get('text', '')
+            if text:
+                virtual_mouse.type_text(text)
+            self.send_json({"status": "ok"})
+
+        elif path == '/api/keyboard/key':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
+            key = body.get('key', '')
+            if key:
+                virtual_mouse.press_key(key)
+            self.send_json({"status": "ok"})
+
+        # 14. Unpair Device API (Local PC or Phone)
+        elif path in ('/api/devices/unpair', '/api/unpair'):
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
+            ident = body.get('token') or body.get('client_id') or body.get('id') or body.get('ip') or (token if not client_info.get('local') else None)
+            if not ident:
+                self.send_json({"error": "missing_device_id"}, status=400)
+                return
+            ok, msg = unpair_device(ident)
+            self.send_json({"status": "ok" if ok else "error", "message": msg})
 
         else:
             self.send_error(404, "Not Found")
@@ -2026,6 +2596,7 @@ def main():
     port = cfg.get('web_port', 1760)
     local_ip = get_local_ip()
 
+    update_dolphin_servicemenu()
     start_udp_discovery_server(port)
     start_udp_beacon(port)
     start_udp_mouse_listener(1762)

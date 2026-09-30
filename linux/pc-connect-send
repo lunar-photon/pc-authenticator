@@ -116,11 +116,19 @@ def stage_file_fallback(filepath):
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: pc-connect-send <file1> [file2] ...")
+        print("Usage: pc-connect-send [--device <name_or_id>] <file1> [file2] ...")
         sys.exit(1)
 
+    specified_device = None
+    args = sys.argv[1:]
+    if '--device' in args:
+        dev_idx = args.index('--device')
+        if dev_idx + 1 < len(args):
+            specified_device = args[dev_idx + 1]
+            args = args[:dev_idx] + args[dev_idx + 2:]
+
     files = []
-    for arg in sys.argv[1:]:
+    for arg in args:
         p = arg.strip()
         if p.startswith('file://'):
             p = unquote(urlparse(p).path)
@@ -140,14 +148,21 @@ def main():
     devices = st.get('devices', [])
     target_device = None
 
+    if specified_device:
+        for d in devices:
+            if specified_device in (d.get('client_id'), d.get('token'), d.get('client_name'), d.get('ip')):
+                target_device = d
+                break
+
     # If only 1 device is paired, it just sends without any prompt
-    if len(devices) > 1:
-        target_device = choose_device_gui(devices)
-        if not target_device:
-            # User canceled device selection
-            sys.exit(0)
-    elif len(devices) == 1:
-        target_device = devices[0]
+    if not target_device:
+        if len(devices) > 1:
+            target_device = choose_device_gui(devices)
+            if not target_device:
+                # User canceled device selection
+                sys.exit(0)
+        elif len(devices) == 1:
+            target_device = devices[0]
 
     phone = st.get('phone', {})
     phone_ip = target_device.get('ip') if target_device else phone.get('ip')

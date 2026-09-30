@@ -83,7 +83,7 @@ public class AuthService extends Service {
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
         if (pm != null) {
             wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PCAuth::ListeningLock");
-            wakeLock.acquire(10 * 60 * 1000L); // 10 minutes, refreshed periodically
+            // Battery optimization: Keep socket event-driven, do not hold continuous wake lock
         }
 
         fileServer = new FileServer(this);
@@ -247,6 +247,8 @@ public class AuthService extends Service {
                                     handleClipboardEvent(json);
                                 } else if ("incoming_file".equals(event)) {
                                     handleIncomingFileEvent(json);
+                                } else if ("unpaired".equals(event)) {
+                                    handleUnpairedEvent();
                                 }
                             } catch (Exception e) {
                                 Log.e(TAG, "JSON parse error", e);
@@ -268,8 +270,8 @@ public class AuthService extends Service {
                 broadcastStatus(false, "Disconnected (Reconnecting...)");
                 updateForegroundNotification("Searching for laptop...");
 
-                // If connection failed 2+ times, automatically probe network/hotspot to find new laptop IP
-                if (consecutiveFails >= 2) {
+                // Exponentially probe network/hotspot to find new laptop IP without draining battery
+                if (consecutiveFails == 2 || consecutiveFails == 6 || (consecutiveFails > 6 && consecutiveFails % 20 == 0)) {
                     DeviceManager.discoverDevices(this, new DeviceManager.DiscoveryCallback() {
                         @Override
                         public void onDiscovered(PairedDevice device) {
@@ -294,10 +296,27 @@ public class AuthService extends Service {
 
             if (isRunning) {
                 try {
-                    Thread.sleep(2500);
+                    // Exponential backoff: 2s -> 4s -> 8s -> 16s -> 30s max
+                    long backoff = (consecutiveFails <= 0) ? 2000L : Math.min(30000L, 2000L * (1L << Math.min(consecutiveFails - 1, 4)));
+                    Thread.sleep(backoff);
                 } catch (InterruptedException ignored) {}
             }
         }
+    }
+
+    private void handleUnpairedEvent() {
+        Log.w(TAG, "Device was unpaired by PC");
+        PairedDevice active = DeviceManager.getActiveDevice(this);
+        if (active != null) {
+            active.authToken = "";
+            active.secretKey = "";
+            DeviceManager.addOrUpdateDevice(this, active);
+        }
+        cancelChallengeNotification(this);
+        broadcastStatus(false, "⚠️ Unpaired by PC");
+        updateForegroundNotification("⚠️ Unpaired by PC (Tap to pair)");
+        Intent updateIntent = new Intent("com.lunarphoton.pcauthenticator.CHALLENGE_RESOLVED");
+        sendBroadcast(updateIntent);
     }
 
     private void handleChallengeEvent(JSONObject json) {

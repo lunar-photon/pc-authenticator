@@ -36,13 +36,23 @@ import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.ContentResolver;
+import android.content.ContentValues;
 import android.database.Cursor;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.media.MediaScannerConnection;
+import android.provider.MediaStore;
 import android.provider.OpenableColumns;
+import android.widget.ImageView;
+import android.widget.ProgressBar;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -50,7 +60,10 @@ import java.net.URL;
 import java.net.URLEncoder;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 public class MainActivity extends Activity {
     private TextView tvHostname;
@@ -78,6 +91,19 @@ public class MainActivity extends Activity {
     private Button btnMediaNext;
     private Button btnMediaVolDown;
     private Button btnMediaVolUp;
+
+    // Laptop Live Status UI
+    private TextView tvPcLockBadge;
+    private TextView tvPcBattery;
+    private TextView tvPcUptime;
+    private TextView tvPcCpu;
+    private TextView tvPcMemory;
+    private TextView tvPcWeather;
+    private Button btnLockLaptopAction;
+    private Button btnScreenshotAction;
+    private Button btnSearchFilesAction;
+    private boolean isPcCurrentlyLocked = false;
+    private Bitmap currentScreenshotBitmap = null;
 
     private LinearLayout layoutChallenge;
     private TextView tvChallengeMessage;
@@ -181,6 +207,27 @@ public class MainActivity extends Activity {
         btnMediaVolUp = findViewById(R.id.btn_media_volup);
 
         setupKdeConnectListeners();
+
+        // Laptop Live Status UI bindings
+        tvPcLockBadge = findViewById(R.id.tv_pc_lock_badge);
+        tvPcBattery = findViewById(R.id.tv_pc_battery);
+        tvPcUptime = findViewById(R.id.tv_pc_uptime);
+        tvPcCpu = findViewById(R.id.tv_pc_cpu);
+        tvPcMemory = findViewById(R.id.tv_pc_memory);
+        tvPcWeather = findViewById(R.id.tv_pc_weather);
+        btnLockLaptopAction = findViewById(R.id.btn_lock_laptop_action);
+        btnScreenshotAction = findViewById(R.id.btn_screenshot_action);
+        btnSearchFilesAction = findViewById(R.id.btn_search_files_action);
+
+        if (btnLockLaptopAction != null) {
+            btnLockLaptopAction.setOnClickListener(v -> confirmAndLockPc());
+        }
+        if (btnScreenshotAction != null) {
+            btnScreenshotAction.setOnClickListener(v -> showScreenshotDialog());
+        }
+        if (btnSearchFilesAction != null) {
+            btnSearchFilesAction.setOnClickListener(v -> showFileSearchDialog());
+        }
 
         // Header Settings Button
         btnSettings = findViewById(R.id.btn_settings);
@@ -1294,6 +1341,20 @@ public class MainActivity extends Activity {
         }).start();
     }
 
+    private void confirmAndLockPc() {
+        if (isPcCurrentlyLocked) {
+            Toast.makeText(this, "🔒 Laptop is already locked", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("🔒 Lock Laptop Screen")
+                .setMessage("Are you sure you want to lock your laptop screen now?")
+                .setPositiveButton("Lock Screen", (dialog, which) -> lockPc())
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
     private void lockPc() {
         new Thread(() -> {
             try {
@@ -1310,12 +1371,403 @@ public class MainActivity extends Activity {
                 try (OutputStream os = conn.getOutputStream()) {
                     os.write(body.toString().getBytes("UTF-8"));
                 }
-                conn.getResponseCode();
-                runOnUiThread(() -> Toast.makeText(MainActivity.this, "🔒 Laptop screen locked!", Toast.LENGTH_SHORT).show());
+                int code = conn.getResponseCode();
+                runOnUiThread(() -> {
+                    if (code == 200) {
+                        isPcCurrentlyLocked = true;
+                        if (tvPcLockBadge != null) {
+                            tvPcLockBadge.setText("🔒 Locked");
+                            tvPcLockBadge.setTextColor(Color.parseColor("#bf616a"));
+                        }
+                        Toast.makeText(MainActivity.this, "🔒 Laptop screen locked!", Toast.LENGTH_SHORT).show();
+                    } else {
+                        Toast.makeText(MainActivity.this, "❌ Failed to lock (HTTP " + code + ")", Toast.LENGTH_SHORT).show();
+                    }
+                });
             } catch (Exception e) {
                 runOnUiThread(() -> Toast.makeText(MainActivity.this, "❌ Error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
             }
         }).start();
+    }
+
+    private void fetchLaptopStatus() {
+        new Thread(() -> {
+            try {
+                PairedDevice active = DeviceManager.getActiveDevice(this);
+                if (active == null) return;
+                String url = active.getBaseUrl() + "/api/pc/status";
+                HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(3000);
+                conn.setReadTimeout(3000);
+                if (active.isPaired()) {
+                    conn.setRequestProperty("Authorization", "Bearer " + active.authToken);
+                }
+                int code = conn.getResponseCode();
+                if (code == 200) {
+                    StringBuilder sb = new StringBuilder();
+                    try (BufferedReader r = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"))) {
+                        String line;
+                        while ((line = r.readLine()) != null) sb.append(line);
+                    }
+                    JSONObject res = new JSONObject(sb.toString());
+                    boolean locked = res.optBoolean("locked", false);
+                    isPcCurrentlyLocked = locked;
+                    JSONObject bat = res.optJSONObject("battery");
+                    JSONObject cpu = res.optJSONObject("cpu");
+                    JSONObject mem = res.optJSONObject("memory");
+                    JSONObject up = res.optJSONObject("uptime");
+                    String weatherStr = res.optString("weather", "");
+
+                    runOnUiThread(() -> {
+                        if (tvPcLockBadge != null) {
+                            if (locked) {
+                                tvPcLockBadge.setText("🔒 Locked");
+                                tvPcLockBadge.setTextColor(Color.parseColor("#bf616a"));
+                            } else {
+                                tvPcLockBadge.setText("🔓 Unlocked");
+                                tvPcLockBadge.setTextColor(Color.parseColor("#a3be8c"));
+                            }
+                        }
+                        if (tvPcBattery != null && bat != null) {
+                            int pct = bat.optInt("percent", -1);
+                            boolean charging = bat.optBoolean("charging", false);
+                            if (pct >= 0) {
+                                tvPcBattery.setText("🔋 Battery: " + pct + "%" + (charging ? " (⚡)" : ""));
+                            }
+                        }
+                        if (tvPcUptime != null && up != null) {
+                            String formatted = up.optString("formatted", "--");
+                            tvPcUptime.setText("⏱️ Uptime: " + formatted);
+                        }
+                        if (tvPcCpu != null && cpu != null) {
+                            double usage = cpu.optDouble("usage_pct", 0.0);
+                            tvPcCpu.setText(String.format(Locale.US, "📊 CPU: %.1f%%", usage));
+                        }
+                        if (tvPcMemory != null && mem != null) {
+                            double used = mem.optDouble("used_gb", 0.0);
+                            double total = mem.optDouble("total_gb", 0.0);
+                            int pct = mem.optInt("used_pct", 0);
+                            tvPcMemory.setText(String.format(Locale.US, "💾 RAM: %.1f / %.1f GB (%d%%)", used, total, pct));
+                        }
+                        if (tvPcWeather != null && !weatherStr.isEmpty()) {
+                            tvPcWeather.setText("🌤️ " + weatherStr);
+                        }
+                    });
+                }
+            } catch (Exception ignored) {}
+        }).start();
+    }
+
+    private void showScreenshotDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_screenshot, null);
+        builder.setView(dialogView);
+
+        ImageView ivPreview = dialogView.findViewById(R.id.iv_screenshot_preview);
+        ProgressBar pbLoading = dialogView.findViewById(R.id.pb_screenshot_loading);
+        TextView tvTime = dialogView.findViewById(R.id.tv_screenshot_time);
+        Button btnRefresh = dialogView.findViewById(R.id.btn_screenshot_refresh);
+        Button btnSave = dialogView.findViewById(R.id.btn_screenshot_save);
+
+        AlertDialog dialog = builder.create();
+
+        Runnable fetchScreenshot = () -> {
+            pbLoading.setVisibility(View.VISIBLE);
+            tvTime.setText("Capturing screen...");
+            new Thread(() -> {
+                try {
+                    PairedDevice active = DeviceManager.getActiveDevice(this);
+                    String url = active.getBaseUrl() + "/api/screen/screenshot";
+                    HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                    conn.setRequestMethod("GET");
+                    conn.setConnectTimeout(8000);
+                    conn.setReadTimeout(10000);
+                    if (active.isPaired()) {
+                        conn.setRequestProperty("Authorization", "Bearer " + active.authToken);
+                    }
+                    int code = conn.getResponseCode();
+                    if (code == 200) {
+                        try (InputStream is = conn.getInputStream()) {
+                            Bitmap bm = BitmapFactory.decodeStream(is);
+                            currentScreenshotBitmap = bm;
+                            String timeStr = new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date());
+                            runOnUiThread(() -> {
+                                pbLoading.setVisibility(View.GONE);
+                                if (bm != null) {
+                                    ivPreview.setImageBitmap(bm);
+                                    tvTime.setText("Captured at " + timeStr);
+                                } else {
+                                    tvTime.setText("Failed to decode screenshot");
+                                }
+                            });
+                        }
+                    } else {
+                        runOnUiThread(() -> {
+                            pbLoading.setVisibility(View.GONE);
+                            tvTime.setText("Capture error (HTTP " + code + ")");
+                        });
+                    }
+                } catch (Exception e) {
+                    runOnUiThread(() -> {
+                        pbLoading.setVisibility(View.GONE);
+                        tvTime.setText("Error: " + e.getMessage());
+                    });
+                }
+            }).start();
+        };
+
+        btnRefresh.setOnClickListener(v -> fetchScreenshot.run());
+
+        btnSave.setOnClickListener(v -> {
+            if (currentScreenshotBitmap == null) {
+                Toast.makeText(this, "No screenshot available to save", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            saveScreenshotToGallery(currentScreenshotBitmap);
+        });
+
+        fetchScreenshot.run();
+        dialog.show();
+    }
+
+    private void saveScreenshotToGallery(Bitmap bitmap) {
+        String filename = "PC_Screenshot_" + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date()) + ".jpg";
+        try {
+            OutputStream fos = null;
+            File imageFile = null;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ContentValues values = new ContentValues();
+                values.put(MediaStore.Images.Media.DISPLAY_NAME, filename);
+                values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+                values.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/PC_Screenshots");
+                Uri uri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+                if (uri != null) {
+                    fos = getContentResolver().openOutputStream(uri);
+                }
+            } else {
+                File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "PC_Screenshots");
+                if (!dir.exists()) dir.mkdirs();
+                imageFile = new File(dir, filename);
+                fos = new FileOutputStream(imageFile);
+            }
+
+            if (fos != null) {
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 95, fos);
+                fos.flush();
+                fos.close();
+                if (imageFile != null) {
+                    MediaScannerConnection.scanFile(this, new String[]{imageFile.getAbsolutePath()}, new String[]{"image/jpeg"}, null);
+                }
+                Toast.makeText(this, "📸 Saved to Pictures/PC_Screenshots!", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "Could not open storage to save screenshot", Toast.LENGTH_SHORT).show();
+            }
+        } catch (Exception e) {
+            Toast.makeText(this, "Failed to save: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void showFileSearchDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_file_search, null);
+        builder.setView(dialogView);
+
+        EditText etQuery = dialogView.findViewById(R.id.et_search_query);
+        Button btnSearch = dialogView.findViewById(R.id.btn_search_submit);
+        TextView tvStatus = dialogView.findViewById(R.id.tv_search_status);
+        LinearLayout containerResults = dialogView.findViewById(R.id.container_search_results);
+
+        AlertDialog dialog = builder.create();
+
+        Runnable runSearch = () -> {
+            String q = etQuery.getText().toString().trim();
+            if (q.isEmpty()) {
+                tvStatus.setText("Please enter a search term");
+                return;
+            }
+            tvStatus.setText("🔍 Searching laptop files for '" + q + "'...");
+            containerResults.removeAllViews();
+
+            new Thread(() -> {
+                try {
+                    PairedDevice active = DeviceManager.getActiveDevice(this);
+                    String url = active.getBaseUrl() + "/api/files/search?q=" + URLEncoder.encode(q, "UTF-8");
+                    HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                    conn.setRequestMethod("GET");
+                    conn.setConnectTimeout(8000);
+                    conn.setReadTimeout(12000);
+                    if (active.isPaired()) {
+                        conn.setRequestProperty("Authorization", "Bearer " + active.authToken);
+                    }
+                    int code = conn.getResponseCode();
+                    if (code == 200) {
+                        StringBuilder sb = new StringBuilder();
+                        try (BufferedReader r = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"))) {
+                            String line;
+                            while ((line = r.readLine()) != null) sb.append(line);
+                        }
+                        JSONArray results = new JSONArray(sb.toString());
+                        runOnUiThread(() -> {
+                            int count = results.length();
+                            if (count == 0) {
+                                tvStatus.setText("No matching files found on laptop.");
+                                return;
+                            }
+                            tvStatus.setText("Found " + count + " file" + (count == 1 ? "" : "s") + " on laptop:");
+                            LayoutInflater inflater = LayoutInflater.from(this);
+                            for (int i = 0; i < count; i++) {
+                                JSONObject item = results.optJSONObject(i);
+                                if (item == null) continue;
+                                String name = item.optString("name", "Unknown");
+                                String path = item.optString("path", "");
+                                String sizeStr = item.optString("size_formatted", "");
+
+                                View row = inflater.inflate(R.layout.item_file_search, containerResults, false);
+                                TextView tvIcon = row.findViewById(R.id.tv_file_icon);
+                                TextView tvName = row.findViewById(R.id.tv_file_name);
+                                TextView tvDetails = row.findViewById(R.id.tv_file_details);
+                                Button btnGet = row.findViewById(R.id.btn_file_download);
+
+                                tvName.setText(name);
+                                String lower = name.toLowerCase();
+                                if (lower.endsWith(".pdf")) tvIcon.setText("📕");
+                                else if (lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".webp") || lower.endsWith(".gif")) tvIcon.setText("🖼️");
+                                else if (lower.endsWith(".mp4") || lower.endsWith(".mkv") || lower.endsWith(".mov") || lower.endsWith(".avi")) tvIcon.setText("🎥");
+                                else if (lower.endsWith(".mp3") || lower.endsWith(".wav") || lower.endsWith(".flac") || lower.endsWith(".m4a")) tvIcon.setText("🎵");
+                                else if (lower.endsWith(".zip") || lower.endsWith(".tar") || lower.endsWith(".gz") || lower.endsWith(".7z")) tvIcon.setText("📦");
+                                else if (lower.endsWith(".apk")) tvIcon.setText("📱");
+                                else if (lower.endsWith(".txt") || lower.endsWith(".md") || lower.endsWith(".py") || lower.endsWith(".java") || lower.endsWith(".c")) tvIcon.setText("📝");
+                                else tvIcon.setText("📄");
+
+                                String shortDir = path;
+                                int lastSlash = path.lastIndexOf('/');
+                                if (lastSlash > 0) {
+                                    shortDir = path.substring(0, lastSlash);
+                                    if (shortDir.length() > 28) {
+                                        shortDir = "..." + shortDir.substring(shortDir.length() - 25);
+                                    }
+                                }
+                                tvDetails.setText(sizeStr + " • " + shortDir);
+
+                                btnGet.setOnClickListener(v -> downloadFileFromLaptop(path, name, dialog));
+                                containerResults.addView(row);
+                            }
+                        });
+                    } else {
+                        runOnUiThread(() -> tvStatus.setText("Search failed (HTTP " + code + ")"));
+                    }
+                } catch (Exception e) {
+                    runOnUiThread(() -> tvStatus.setText("Error: " + e.getMessage()));
+                }
+            }).start();
+        };
+
+        btnSearch.setOnClickListener(v -> runSearch.run());
+        etQuery.setOnEditorActionListener((v, actionId, event) -> {
+            runSearch.run();
+            return true;
+        });
+
+        dialog.show();
+    }
+
+    private void downloadFileFromLaptop(String pcPath, String filename, AlertDialog parentDialog) {
+        Toast.makeText(this, "⏳ Downloading " + filename + "...", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            try {
+                PairedDevice active = DeviceManager.getActiveDevice(this);
+                String url = active.getBaseUrl() + "/api/files/download_pc?path=" + URLEncoder.encode(pcPath, "UTF-8");
+                HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(10000);
+                conn.setReadTimeout(60000);
+                if (active.isPaired()) {
+                    conn.setRequestProperty("Authorization", "Bearer " + active.authToken);
+                }
+
+                File destDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+                if (!destDir.exists()) destDir.mkdirs();
+                File dest = new File(destDir, filename);
+                int c = 1;
+                String base = filename;
+                String ext = "";
+                int dot = filename.lastIndexOf(".");
+                if (dot > 0) {
+                    base = filename.substring(0, dot);
+                    ext = filename.substring(dot);
+                }
+                while (dest.exists()) {
+                    dest = new File(destDir, base + " (" + c + ")" + ext);
+                    c++;
+                }
+
+                String mimeType = PCFileProvider.getMimeType(dest.getName());
+                OutputStream fos = null;
+                try {
+                    fos = new FileOutputStream(dest);
+                } catch (Exception directEx) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        try {
+                            ContentValues values = new ContentValues();
+                            values.put(MediaStore.MediaColumns.DISPLAY_NAME, dest.getName());
+                            values.put(MediaStore.MediaColumns.MIME_TYPE, mimeType);
+                            values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
+                            Uri insertedUri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                            if (insertedUri != null) {
+                                fos = getContentResolver().openOutputStream(insertedUri);
+                            }
+                        } catch (Exception ignored) {}
+                    }
+                }
+
+                if (fos != null) {
+                    try (InputStream in = conn.getInputStream();
+                         OutputStream outStream = fos) {
+                        byte[] buf = new byte[65536];
+                        int r;
+                        while ((r = in.read(buf)) != -1) {
+                            outStream.write(buf, 0, r);
+                        }
+                        outStream.flush();
+                    }
+
+                    try {
+                        MediaScannerConnection.scanFile(this, new String[]{dest.getAbsolutePath()}, new String[]{mimeType}, null);
+                    } catch (Exception ignored) {}
+
+                    final File finalFile = dest;
+                    runOnUiThread(() -> {
+                        Toast.makeText(MainActivity.this, "✅ Saved: " + finalFile.getName() + "! Opening...", Toast.LENGTH_LONG).show();
+                        openDownloadedFile(finalFile);
+                    });
+                }
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Download error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+            }
+        }).start();
+    }
+
+    private void openDownloadedFile(File file) {
+        try {
+            String mimeType = PCFileProvider.getMimeType(file.getAbsolutePath());
+            Uri fileUri = PCFileProvider.getUriForFile(this, file);
+            Intent viewIntent = new Intent(Intent.ACTION_VIEW);
+            viewIntent.setDataAndType(fileUri, mimeType);
+            viewIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            viewIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+            try {
+                List<android.content.pm.ResolveInfo> resInfoList = getPackageManager().queryIntentActivities(viewIntent, PackageManager.MATCH_DEFAULT_ONLY);
+                for (android.content.pm.ResolveInfo resolveInfo : resInfoList) {
+                    grantUriPermission(resolveInfo.activityInfo.packageName, fileUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                }
+            } catch (Exception ignored) {}
+
+            startActivity(viewIntent);
+        } catch (Exception e) {
+            Toast.makeText(this, "Saved to Downloads: " + file.getName(), Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void showOpenWebpageDialog() {
@@ -1460,13 +1912,19 @@ public class MainActivity extends Activity {
         updateChallengeUIFromStore();
         checkActiveChallenge();
         fetchMediaStatus();
+        fetchLaptopStatus();
 
-        // Start periodic check every 2.5 seconds while activity is in foreground
+        // Start periodic check while activity is in foreground
         pollRunnable = new Runnable() {
+            private int statusCounter = 0;
             @Override
             public void run() {
                 checkActiveChallenge();
                 fetchMediaStatus();
+                statusCounter++;
+                if (statusCounter % 2 == 0) {
+                    fetchLaptopStatus();
+                }
                 pollHandler.postDelayed(this, 2500);
             }
         };

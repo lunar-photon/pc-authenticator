@@ -14,9 +14,12 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.Vibrator;
 import android.view.HapticFeedbackConstants;
+import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
@@ -113,11 +116,12 @@ public class TrackpadActivity extends Activity implements SensorEventListener {
         });
 
         findViewById(R.id.btn_trackpad_back).setOnClickListener(v -> finish());
-        findViewById(R.id.btn_trackpad_keyboard).setOnClickListener(v -> showKeyboardDialog());
+        findViewById(R.id.btn_trackpad_keyboard).setOnClickListener(v -> toggleKeyboardPanel());
 
         setupTouchpad();
         setupLaserPointer();
         setupClickButtons();
+        setupKeyboardPanel();
         startNetworkSender();
     }
 
@@ -399,6 +403,90 @@ public class TrackpadActivity extends Activity implements SensorEventListener {
         });
     }
 
+    private void toggleKeyboardPanel() {
+        View panel = findViewById(R.id.layout_keyboard_panel);
+        if (panel == null) return;
+        if (panel.getVisibility() == View.VISIBLE) {
+            panel.setVisibility(View.GONE);
+            InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (imm != null) {
+                imm.hideSoftInputFromWindow(panel.getWindowToken(), 0);
+            }
+        } else {
+            panel.setVisibility(View.VISIBLE);
+            EditText et = findViewById(R.id.et_keyboard_input);
+            if (et != null) {
+                et.requestFocus();
+                InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                if (imm != null) {
+                    imm.showSoftInput(et, InputMethodManager.SHOW_IMPLICIT);
+                }
+            }
+        }
+    }
+
+    private void setupKeyboardPanel() {
+        EditText et = findViewById(R.id.et_keyboard_input);
+        Button btnSend = findViewById(R.id.btn_key_send_text);
+        if (et != null) {
+            et.setOnEditorActionListener((v, actionId, event) -> {
+                if (actionId == EditorInfo.IME_ACTION_SEND || (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER && event.getAction() == KeyEvent.ACTION_DOWN)) {
+                    String t = et.getText().toString();
+                    if (!t.isEmpty()) {
+                        sendText(t);
+                        et.setText("");
+                        vibrate(15);
+                    }
+                    return true;
+                }
+                return false;
+            });
+        }
+        if (btnSend != null && et != null) {
+            btnSend.setOnClickListener(v -> {
+                String t = et.getText().toString();
+                if (!t.isEmpty()) {
+                    sendText(t);
+                    et.setText("");
+                    vibrate(15);
+                }
+            });
+        }
+
+        setupKeyButton(R.id.btn_key_esc, "esc");
+        setupKeyButton(R.id.btn_key_tab, "tab");
+        setupKeyButton(R.id.btn_key_super, "super");
+        setupKeyButton(R.id.btn_key_backspace, "backspace");
+        setupKeyButton(R.id.btn_key_enter, "enter");
+        setupKeyButton(R.id.btn_key_ctrl_c, "ctrl+c");
+        setupKeyButton(R.id.btn_key_ctrl_v, "ctrl+v");
+        setupKeyButton(R.id.btn_key_ctrl_z, "ctrl+z");
+        setupKeyButton(R.id.btn_key_left, "left");
+        setupKeyButton(R.id.btn_key_up, "up");
+        setupKeyButton(R.id.btn_key_down, "down");
+        setupKeyButton(R.id.btn_key_right, "right");
+    }
+
+    private void setupKeyButton(int id, String key) {
+        Button btn = findViewById(id);
+        if (btn != null) {
+            btn.setOnClickListener(v -> {
+                sendKeyAction(key);
+                vibrate(15);
+            });
+        }
+    }
+
+    private void sendText(String text) {
+        if (text == null || text.isEmpty()) return;
+        try {
+            JSONObject obj = new JSONObject();
+            obj.put("type", "text");
+            obj.put("text", text);
+            sendQueue.offer(obj);
+        } catch (Exception ignored) {}
+    }
+
     private void showKeyboardDialog() {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("⌨️ Type or Send to PC");
@@ -583,6 +671,14 @@ public class TrackpadActivity extends Activity implements SensorEventListener {
             sendPointerState(false);
             updateLaserStatusUi(false);
         }
+        View panel = findViewById(R.id.layout_keyboard_panel);
+        if (panel != null && panel.getVisibility() == View.VISIBLE) {
+            InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (imm != null) {
+                imm.hideSoftInputFromWindow(panel.getWindowToken(), 0);
+            }
+        }
+        sendQueue.clear();
         super.onPause();
     }
 
