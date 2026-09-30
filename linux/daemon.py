@@ -2371,7 +2371,6 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             if url and (url.startswith('http://') or url.startswith('https://')):
                 try:
                     subprocess.Popen(['xdg-open', url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    set_kde_clipboard(url)
                     try:
                         subprocess.Popen(['notify-send', '-i', 'applications-internet', '-a', 'PC Connect', '🌐 Webpage Received', url], stderr=subprocess.DEVNULL)
                     except Exception:
