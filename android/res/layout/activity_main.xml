@@ -28,7 +28,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="🔒 PC Authenticator"
+                    android:text="🔗 PC Connect"
                     android:textSize="22sp"
                     android:textStyle="bold"
                     android:textColor="@color/text_white" />
@@ -36,7 +36,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Linux Screen Lock Multi-Device 2FA"
+                    android:text="Linux Desktop Connect &amp; 2FA Suite"
                     android:textSize="12sp"
                     android:textColor="@color/text_muted"
                     android:layout_marginTop="2dp" />

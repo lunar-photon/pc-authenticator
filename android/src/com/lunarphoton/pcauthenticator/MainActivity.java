@@ -131,6 +131,8 @@ public class MainActivity extends Activity {
     private CountDownTimer countDownTimer;
     private Handler pollHandler = new Handler(Looper.getMainLooper());
     private Runnable pollRunnable;
+    private File pendingInstallApk = null;
+    private ClipboardManager.OnPrimaryClipChangedListener mainClipListener = null;
 
     private final BroadcastReceiver serviceReceiver = new BroadcastReceiver() {
         @Override
@@ -340,7 +342,22 @@ public class MainActivity extends Activity {
     }
 
     private void handleIntent(Intent intent) {
-        if (intent == null || !intent.getBooleanExtra("from_challenge", false)) {
+        if (intent == null) {
+            return;
+        }
+
+        if ("com.lunarphoton.pcauthenticator.INSTALL_APK".equals(intent.getAction()) || intent.hasExtra("apk_path")) {
+            String apkPath = intent.getStringExtra("apk_path");
+            intent.removeExtra("apk_path");
+            if (apkPath != null) {
+                File apkFile = new File(apkPath);
+                if (apkFile.exists()) {
+                    openDownloadedFile(apkFile);
+                }
+            }
+        }
+
+        if (!intent.getBooleanExtra("from_challenge", false)) {
             return;
         }
 
@@ -1257,6 +1274,7 @@ public class MainActivity extends Activity {
                 return;
             }
 
+            AuthService.lastSyncedClipboard = text.toString();
             Toast.makeText(this, "📋 Sending clipboard to PC...", Toast.LENGTH_SHORT).show();
             new Thread(() -> {
                 try {
@@ -1312,6 +1330,7 @@ public class MainActivity extends Activity {
                     String text = res.optString("text", "");
                     runOnUiThread(() -> {
                         if (!text.isEmpty()) {
+                            AuthService.lastSyncedClipboard = text;
                             ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
                             if (cm != null) {
                                 cm.setPrimaryClip(ClipData.newPlainText("PC Clipboard", text));
@@ -1784,10 +1803,38 @@ public class MainActivity extends Activity {
         try {
             String mimeType = PCFileProvider.getMimeType(file.getAbsolutePath());
             Uri fileUri = PCFileProvider.getUriForFile(this, file);
+            boolean isApk = file.getName().toLowerCase().endsWith(".apk") || "application/vnd.android.package-archive".equals(mimeType);
+            if (isApk) {
+                mimeType = "application/vnd.android.package-archive";
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !getPackageManager().canRequestPackageInstalls()) {
+                    pendingInstallApk = file;
+                    new AlertDialog.Builder(this)
+                        .setTitle("📦 Install Permission Required")
+                        .setMessage("To install " + file.getName() + ", please enable 'Allow from this source' for PC Connect in Settings.")
+                        .setPositiveButton("Open Settings", (d, w) -> {
+                            try {
+                                Intent sIntent = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                        Uri.parse("package:" + getPackageName()));
+                                startActivity(sIntent);
+                            } catch (Exception ex) {
+                                try {
+                                    startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES));
+                                } catch (Exception ignored) {}
+                            }
+                        })
+                        .setNegativeButton("Cancel", null)
+                        .show();
+                    return;
+                }
+            }
+
             Intent viewIntent = new Intent(Intent.ACTION_VIEW);
             viewIntent.setDataAndType(fileUri, mimeType);
             viewIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             viewIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            if (isApk) {
+                viewIntent.putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true);
+            }
 
             try {
                 List<android.content.pm.ResolveInfo> resInfoList = getPackageManager().queryIntentActivities(viewIntent, PackageManager.MATCH_DEFAULT_ONLY);
@@ -1795,6 +1842,15 @@ public class MainActivity extends Activity {
                     grantUriPermission(resolveInfo.activityInfo.packageName, fileUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 }
             } catch (Exception ignored) {}
+
+            if (isApk) {
+                String[] commonInstallers = {"com.google.android.packageinstaller", "com.android.packageinstaller", "com.google.android.permissioncontroller"};
+                for (String pkg : commonInstallers) {
+                    try {
+                        grantUriPermission(pkg, fileUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    } catch (Exception ignored) {}
+                }
+            }
 
             startActivity(viewIntent);
         } catch (Exception e) {
@@ -2098,6 +2154,31 @@ public class MainActivity extends Activity {
             RingManager.stopAlarm(this);
             Toast.makeText(this, "🔔 Alarm stopped", Toast.LENGTH_SHORT).show();
         }
+
+        // Auto-install pending APK if permission was just granted
+        if (pendingInstallApk != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (getPackageManager().canRequestPackageInstalls()) {
+                File apkToInstall = pendingInstallApk;
+                pendingInstallApk = null;
+                openDownloadedFile(apkToInstall);
+            }
+        }
+
+        // Auto-sync clipboard if changed
+        AuthService.checkAndSyncPhoneClipboard(this);
+
+        // Register clipboard listener while in foreground
+        try {
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null) {
+                if (mainClipListener == null) {
+                    mainClipListener = () -> AuthService.checkAndSyncPhoneClipboard(MainActivity.this);
+                }
+                cm.removePrimaryClipChangedListener(mainClipListener);
+                cm.addPrimaryClipChangedListener(mainClipListener);
+            }
+        } catch (Exception ignored) {}
+
         refreshDeviceList();
         updateChallengeUIFromStore();
         checkActiveChallenge();
@@ -2125,8 +2206,22 @@ public class MainActivity extends Activity {
     protected void onPause() {
         super.onPause();
         cancelBiometricPrompt();
+        try {
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null && mainClipListener != null) {
+                cm.removePrimaryClipChangedListener(mainClipListener);
+            }
+        } catch (Exception ignored) {}
         if (pollRunnable != null) {
             pollHandler.removeCallbacks(pollRunnable);
+        }
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            AuthService.checkAndSyncPhoneClipboard(this);
         }
     }
 

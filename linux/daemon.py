@@ -675,6 +675,10 @@ def send_mpris_command(command):
         return True
     return False
 
+_last_pc_clipboard = ""
+_last_phone_clipboard = ""
+_clipboard_lock = threading.Lock()
+
 def get_kde_clipboard():
     try:
         return subprocess.check_output(['qdbus6', 'org.kde.klipper', '/klipper', 'org.kde.klipper.klipper.getClipboardContents'], stderr=subprocess.DEVNULL).decode('utf-8')
@@ -691,6 +695,30 @@ def set_kde_clipboard(text):
         return True
     except Exception:
         return False
+
+def start_clipboard_monitor(auth_mgr):
+    def _monitor():
+        global _last_pc_clipboard
+        try:
+            _last_pc_clipboard = get_kde_clipboard()
+        except Exception:
+            _last_pc_clipboard = ""
+
+        while True:
+            try:
+                time.sleep(1.0)
+                curr = get_kde_clipboard()
+                if curr:
+                    with _clipboard_lock:
+                        if curr != _last_pc_clipboard and curr != _last_phone_clipboard:
+                            _last_pc_clipboard = curr
+                            # Broadcast clipboard content to connected phone(s)
+                            auth_mgr.broadcast_ndjson(json.dumps({"event": "clipboard", "text": curr}) + "\n")
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_monitor, daemon=True)
+    t.start()
 
 def ping_pc():
     def _play_and_notify():
@@ -1880,7 +1908,7 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             try:
                 formatted_pin = f"{pin[:3]} {pin[3:]}"
                 msg = f"Pairing PIN for {client_name}:\n\n👉  {formatted_pin}  👈\n\nEnter this PIN in your phone app to authorize."
-                subprocess.Popen(['notify-send', 'PC Authenticator - Pairing PIN', msg, '-u', 'critical', '-i', 'dialog-password'])
+                subprocess.Popen(['notify-send', 'PC Connect - Pairing PIN', msg, '-u', 'critical', '-i', 'dialog-password'])
             except Exception as e:
                 sys.stderr.write(f"notify-send error: {e}\n")
             sys.stderr.write(f"\n==================================================\n")
@@ -1942,7 +1970,7 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
                 active_phone_state['client_name'] = client_name
                 active_phone_state['auth_token'] = auth_token
                 try:
-                    subprocess.Popen(['notify-send', 'PC Authenticator', f'✅ Successfully paired with {client_name}!', '-u', 'normal'])
+                    subprocess.Popen(['notify-send', 'PC Connect', f'✅ Successfully paired with {client_name}!', '-u', 'normal'])
                 except Exception:
                     pass
                 sys.stderr.write(f"✅ Successfully paired with {client_name} ({auth_token[:8]}...)\n")
@@ -2072,8 +2100,18 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
 
         # 5. Clipboard Sync
         elif path == '/api/clipboard':
+            global _last_phone_clipboard, _last_pc_clipboard
             text = body.get('text', '')
-            if text:
+            if not text and self.client_address[0] in ('127.0.0.1', '::1', 'localhost'):
+                text = get_kde_clipboard()
+                if text:
+                    with _clipboard_lock:
+                        _last_pc_clipboard = text
+                    auth_mgr.broadcast_ndjson(json.dumps({"event": "clipboard", "text": text}) + "\n")
+            elif text:
+                with _clipboard_lock:
+                    _last_phone_clipboard = text
+                    _last_pc_clipboard = text
                 set_kde_clipboard(text)
                 # If triggered from local PC, broadcast to phone
                 if self.client_address[0] in ('127.0.0.1', '::1', 'localhost'):
@@ -2703,6 +2741,7 @@ def main():
     start_udp_discovery_server(port)
     start_udp_beacon(port)
     start_udp_mouse_listener(1762)
+    start_clipboard_monitor(auth_mgr)
 
     server = ThreadingHTTPServer(('0.0.0.0', port), AuthenticatorHandler)
     sys.stderr.write("==================================================\n")

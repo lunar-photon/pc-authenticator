@@ -575,11 +575,28 @@ public class FileServer {
 
             String mimeType = PCFileProvider.getMimeType(file.getAbsolutePath());
             Uri fileUri = PCFileProvider.getUriForFile(context, file);
+            boolean isApk = file.getName().toLowerCase().endsWith(".apk") || "application/vnd.android.package-archive".equals(mimeType);
+            if (isApk) {
+                mimeType = "application/vnd.android.package-archive";
+            }
 
-            Intent viewIntent = new Intent(Intent.ACTION_VIEW);
-            viewIntent.setDataAndType(fileUri, mimeType);
-            viewIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            viewIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            Intent viewIntent;
+            if (isApk && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !context.getPackageManager().canRequestPackageInstalls()) {
+                viewIntent = new Intent(context, MainActivity.class);
+                viewIntent.setAction("com.lunarphoton.pcauthenticator.INSTALL_APK");
+                viewIntent.putExtra("apk_path", file.getAbsolutePath());
+                viewIntent.setDataAndType(fileUri, "application/vnd.android.package-archive");
+                viewIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                viewIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            } else {
+                viewIntent = new Intent(Intent.ACTION_VIEW);
+                viewIntent.setDataAndType(fileUri, mimeType);
+                viewIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                viewIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                if (isApk) {
+                    viewIntent.putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true);
+                }
+            }
 
             try {
                 List<ResolveInfo> resInfoList = context.getPackageManager().queryIntentActivities(viewIntent, PackageManager.MATCH_DEFAULT_ONLY);
@@ -587,6 +604,15 @@ public class FileServer {
                     context.grantUriPermission(resolveInfo.activityInfo.packageName, fileUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 }
             } catch (Exception ignored) {}
+
+            if (isApk) {
+                String[] commonInstallers = {"com.google.android.packageinstaller", "com.android.packageinstaller", "com.google.android.permissioncontroller"};
+                for (String pkg : commonInstallers) {
+                    try {
+                        context.grantUriPermission(pkg, fileUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    } catch (Exception ignored) {}
+                }
+            }
 
             PendingIntent pi = PendingIntent.getActivity(
                     context, (int) System.currentTimeMillis(), viewIntent,
@@ -601,19 +627,26 @@ public class FileServer {
             }
 
             String typeLabel = "File";
-            if (mimeType.startsWith("image/")) typeLabel = "Image";
+            if (isApk) typeLabel = "Android App (APK)";
+            else if (mimeType.startsWith("image/")) typeLabel = "Image";
             else if (mimeType.startsWith("video/")) typeLabel = "Video";
             else if (mimeType.startsWith("audio/")) typeLabel = "Audio";
             else if (mimeType.equals("application/pdf")) typeLabel = "PDF Document";
             else if (mimeType.contains("word") || mimeType.contains("document")) typeLabel = "Document";
             else if (mimeType.contains("excel") || mimeType.contains("sheet")) typeLabel = "Spreadsheet";
-            else if (mimeType.contains("package-archive")) typeLabel = "Android App (APK)";
             else if (mimeType.contains("zip") || mimeType.contains("compressed") || mimeType.contains("tar")) typeLabel = "Archive";
 
-            builder.setContentTitle("📁 " + typeLabel + " Received from PC")
-                    .setContentText(file.getName() + " (" + formatFileSize(file.length()) + ")")
-                    .setSubText(typeLabel)
-                    .setSmallIcon(R.mipmap.ic_launcher)
+            if (isApk) {
+                builder.setContentTitle("📦 Android App Received")
+                        .setContentText("Tap to install " + file.getName())
+                        .setSubText("Install APK");
+            } else {
+                builder.setContentTitle("📁 " + typeLabel + " Received from PC")
+                        .setContentText(file.getName() + " (" + formatFileSize(file.length()) + ")")
+                        .setSubText(typeLabel);
+            }
+
+            builder.setSmallIcon(R.mipmap.ic_launcher)
                     .setAutoCancel(true)
                     .setContentIntent(pi);
 

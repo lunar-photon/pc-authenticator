@@ -47,6 +47,7 @@ import android.telephony.PhoneStateListener;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.os.StatFs;
+import android.widget.Toast;
 
 public class AuthService extends Service {
     private static final String TAG = "PCAuthService";
@@ -60,6 +61,9 @@ public class AuthService extends Service {
     public static final String ACTION_STATUS = "com.lunarphoton.pcauthenticator.CONNECTION_STATUS";
 
     public static final String ACTION_RECONNECT = "com.lunarphoton.pcauthenticator.RECONNECT";
+
+    public static volatile String lastSyncedClipboard = "";
+    private ClipboardManager.OnPrimaryClipChangedListener clipListener = null;
 
     private volatile boolean isRunning = false;
     private volatile HttpURLConnection currentConn = null;
@@ -128,6 +132,7 @@ public class AuthService extends Service {
 
         startUdpBeaconListener();
         initTelephonyListener();
+        initClipboardListener();
     }
 
     private void startUdpBeaconListener() {
@@ -510,7 +515,7 @@ public class AuthService extends Service {
         }
 
         return builder.setSmallIcon(android.R.drawable.ic_lock_idle_lock)
-                .setContentTitle("PC Authenticator")
+                .setContentTitle("PC Connect")
                 .setContentText(status)
                 .setContentIntent(pendingIntent)
                 .setOngoing(true)
@@ -644,7 +649,9 @@ public class AuthService extends Service {
                 try {
                     ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
                     if (cm != null) {
+                        lastSyncedClipboard = text; // Prevent echo loop!
                         cm.setPrimaryClip(ClipData.newPlainText("PC Connect", text));
+                        Toast.makeText(AuthService.this, "📋 Clipboard synced from PC", Toast.LENGTH_SHORT).show();
                     }
                 } catch (Exception ignored) {}
             });
@@ -731,11 +738,28 @@ public class AuthService extends Service {
 
             String mimeType = PCFileProvider.getMimeType(file.getAbsolutePath());
             Uri fileUri = PCFileProvider.getUriForFile(this, file);
+            boolean isApk = file.getName().toLowerCase().endsWith(".apk") || "application/vnd.android.package-archive".equals(mimeType);
+            if (isApk) {
+                mimeType = "application/vnd.android.package-archive";
+            }
 
-            Intent viewIntent = new Intent(Intent.ACTION_VIEW);
-            viewIntent.setDataAndType(fileUri, mimeType);
-            viewIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            viewIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            Intent viewIntent;
+            if (isApk && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !getPackageManager().canRequestPackageInstalls()) {
+                viewIntent = new Intent(this, MainActivity.class);
+                viewIntent.setAction("com.lunarphoton.pcauthenticator.INSTALL_APK");
+                viewIntent.putExtra("apk_path", file.getAbsolutePath());
+                viewIntent.setDataAndType(fileUri, "application/vnd.android.package-archive");
+                viewIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                viewIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            } else {
+                viewIntent = new Intent(Intent.ACTION_VIEW);
+                viewIntent.setDataAndType(fileUri, mimeType);
+                viewIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                viewIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                if (isApk) {
+                    viewIntent.putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true);
+                }
+            }
 
             try {
                 List<ResolveInfo> resInfoList = getPackageManager().queryIntentActivities(viewIntent, PackageManager.MATCH_DEFAULT_ONLY);
@@ -743,6 +767,15 @@ public class AuthService extends Service {
                     grantUriPermission(resolveInfo.activityInfo.packageName, fileUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 }
             } catch (Exception ignored) {}
+
+            if (isApk) {
+                String[] commonInstallers = {"com.google.android.packageinstaller", "com.android.packageinstaller", "com.google.android.permissioncontroller"};
+                for (String pkg : commonInstallers) {
+                    try {
+                        grantUriPermission(pkg, fileUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    } catch (Exception ignored) {}
+                }
+            }
 
             PendingIntent pi = PendingIntent.getActivity(
                     this, (int) System.currentTimeMillis(), viewIntent,
@@ -757,19 +790,26 @@ public class AuthService extends Service {
             }
 
             String typeLabel = "File";
-            if (mimeType.startsWith("image/")) typeLabel = "Image";
+            if (isApk) typeLabel = "Android App (APK)";
+            else if (mimeType.startsWith("image/")) typeLabel = "Image";
             else if (mimeType.startsWith("video/")) typeLabel = "Video";
             else if (mimeType.startsWith("audio/")) typeLabel = "Audio";
             else if (mimeType.equals("application/pdf")) typeLabel = "PDF Document";
             else if (mimeType.contains("word") || mimeType.contains("document")) typeLabel = "Document";
             else if (mimeType.contains("excel") || mimeType.contains("sheet")) typeLabel = "Spreadsheet";
-            else if (mimeType.contains("package-archive")) typeLabel = "Android App (APK)";
             else if (mimeType.contains("zip") || mimeType.contains("compressed") || mimeType.contains("tar")) typeLabel = "Archive";
 
-            builder.setContentTitle("📁 " + typeLabel + " Received from PC")
-                    .setContentText(file.getName() + " (" + formatFileSize(file.length()) + ")")
-                    .setSubText(typeLabel)
-                    .setSmallIcon(R.mipmap.ic_launcher)
+            if (isApk) {
+                builder.setContentTitle("📦 Android App Received")
+                        .setContentText("Tap to install " + file.getName())
+                        .setSubText("Install APK");
+            } else {
+                builder.setContentTitle("📁 " + typeLabel + " Received from PC")
+                        .setContentText(file.getName() + " (" + formatFileSize(file.length()) + ")")
+                        .setSubText(typeLabel);
+            }
+
+            builder.setSmallIcon(R.mipmap.ic_launcher)
                     .setAutoCancel(true)
                     .setContentIntent(pi);
 
@@ -966,9 +1006,74 @@ public class AuthService extends Service {
         }
     }
 
+    private void initClipboardListener() {
+        try {
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null) {
+                clipListener = () -> checkAndSyncPhoneClipboard(AuthService.this);
+                cm.addPrimaryClipChangedListener(clipListener);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Clipboard listener init error: " + e.getMessage());
+        }
+    }
+
+    public static void checkAndSyncPhoneClipboard(Context context) {
+        try {
+            ClipboardManager cm = (ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm == null || !cm.hasPrimaryClip() || cm.getPrimaryClip().getItemCount() == 0) return;
+            ClipData.Item item = cm.getPrimaryClip().getItemAt(0);
+            if (item == null) return;
+            CharSequence seq = item.getText();
+            if (seq == null) return;
+            String text = seq.toString();
+            if (text.isEmpty() || text.equals(lastSyncedClipboard)) return;
+
+            lastSyncedClipboard = text;
+
+            PairedDevice active = DeviceManager.getActiveDevice(context);
+            if (active == null || !active.isPaired()) return;
+
+            new Thread(() -> {
+                try {
+                    String url = active.getBaseUrl() + "/api/clipboard";
+                    HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                    conn.setRequestMethod("POST");
+                    conn.setConnectTimeout(4000);
+                    conn.setReadTimeout(4000);
+                    conn.setRequestProperty("Content-Type", "application/json");
+                    if (active.isPaired()) {
+                        conn.setRequestProperty("Authorization", "Bearer " + active.authToken);
+                    }
+                    conn.setDoOutput(true);
+                    JSONObject body = new JSONObject().put("text", text);
+                    try (OutputStream os = conn.getOutputStream()) {
+                        os.write(body.toString().getBytes("UTF-8"));
+                    }
+                    int code = conn.getResponseCode();
+                    conn.disconnect();
+                    if (code == 200) {
+                        Log.i("AuthService", "Auto-synced phone clipboard to PC (" + text.length() + " chars)");
+                    }
+                } catch (Exception e) {
+                    Log.w("AuthService", "Auto clipboard sync failed: " + e.getMessage());
+                }
+            }).start();
+        } catch (Exception ignored) {}
+    }
+
     @Override
     public void onDestroy() {
         isRunning = false;
+        if (clipListener != null) {
+            try {
+                ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                if (cm != null) {
+                    cm.removePrimaryClipChangedListener(clipListener);
+                }
+            } catch (Exception ignored) {}
+            clipListener = null;
+        }
         if (fileServer != null) {
             fileServer.stop();
         }
