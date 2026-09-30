@@ -11,12 +11,19 @@ public class PairedDevice {
     public String authToken;
     public String secretKey;
     public boolean isActive;
+    public String localUrl;
+    public String internetUrl;
+    public volatile String activeUrl;
 
     public PairedDevice(String hostname, String ip, int port, String user, boolean isActive) {
-        this(null, hostname, ip, port, user, null, null, isActive);
+        this(null, hostname, ip, port, user, null, null, isActive, null, null);
     }
 
     public PairedDevice(String deviceId, String hostname, String ip, int port, String user, String authToken, String secretKey, boolean isActive) {
+        this(deviceId, hostname, ip, port, user, authToken, secretKey, isActive, null, null);
+    }
+
+    public PairedDevice(String deviceId, String hostname, String ip, int port, String user, String authToken, String secretKey, boolean isActive, String localUrl, String internetUrl) {
         this.deviceId = deviceId;
         this.hostname = hostname != null ? hostname : "Unknown PC";
         this.ip = ip;
@@ -25,6 +32,8 @@ public class PairedDevice {
         this.authToken = authToken;
         this.secretKey = secretKey;
         this.isActive = isActive;
+        this.localUrl = localUrl;
+        this.internetUrl = internetUrl;
     }
 
     public boolean isPaired() {
@@ -32,13 +41,49 @@ public class PairedDevice {
     }
 
     public String getBaseUrl() {
-        if (ip == null || ip.isEmpty()) return "http://127.0.0.1:" + port;
-        String clean = ip.trim();
-        if (clean.startsWith("http://") || clean.startsWith("https://")) {
-            if (clean.endsWith("/")) clean = clean.substring(0, clean.length() - 1);
-            return clean;
+        String override = DeviceManager.getActiveUrl();
+        if (override != null && !override.isEmpty()) {
+            return cleanUrl(override);
         }
-        return "http://" + clean + ":" + port;
+        if (activeUrl != null && !activeUrl.isEmpty()) {
+            return cleanUrl(activeUrl);
+        }
+        if (localUrl != null && !localUrl.isEmpty()) {
+            return cleanUrl(localUrl);
+        }
+        if (ip != null && !ip.isEmpty()) {
+            String clean = ip.trim();
+            if (clean.startsWith("http://") || clean.startsWith("https://")) {
+                return cleanUrl(clean);
+            }
+            return "http://" + clean + ":" + port;
+        }
+        if (internetUrl != null && !internetUrl.isEmpty()) {
+            return cleanUrl(internetUrl);
+        }
+        return "http://127.0.0.1:" + port;
+    }
+
+    public String getLocalUrl() {
+        if (localUrl != null && !localUrl.isEmpty()) return cleanUrl(localUrl);
+        if (ip != null && !ip.isEmpty()) {
+            String clean = ip.trim();
+            if (clean.startsWith("http://") || clean.startsWith("https://")) return cleanUrl(clean);
+            return "http://" + clean + ":" + port;
+        }
+        return "http://127.0.0.1:" + port;
+    }
+
+    public String getInternetUrl() {
+        if (internetUrl != null && !internetUrl.isEmpty()) return cleanUrl(internetUrl);
+        return null;
+    }
+
+    private static String cleanUrl(String u) {
+        if (u == null) return "";
+        String s = u.trim();
+        if (s.endsWith("/")) s = s.substring(0, s.length() - 1);
+        return s;
     }
 
     public JSONObject toJsonObject() {
@@ -52,6 +97,8 @@ public class PairedDevice {
             if (authToken != null) obj.put("authToken", authToken);
             if (secretKey != null) obj.put("secretKey", secretKey);
             obj.put("isActive", isActive);
+            if (localUrl != null) obj.put("localUrl", localUrl);
+            if (internetUrl != null) obj.put("internetUrl", internetUrl);
         } catch (Exception ignored) {}
         return obj;
     }
@@ -66,6 +113,8 @@ public class PairedDevice {
         String authToken = obj.optString("authToken", null);
         String secretKey = obj.optString("secretKey", null);
         boolean isActive = obj.optBoolean("isActive", false);
-        return new PairedDevice(deviceId, hostname, ip, port, user, authToken, secretKey, isActive);
+        String localUrl = obj.optString("localUrl", null);
+        String internetUrl = obj.optString("internetUrl", null);
+        return new PairedDevice(deviceId, hostname, ip, port, user, authToken, secretKey, isActive, localUrl, internetUrl);
     }
 }

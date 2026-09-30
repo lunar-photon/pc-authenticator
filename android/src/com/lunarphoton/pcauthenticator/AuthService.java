@@ -10,6 +10,10 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.BroadcastReceiver;
 import android.net.Uri;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.NetworkRequest;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.os.Build;
@@ -133,6 +137,31 @@ public class AuthService extends Service {
         startUdpBeaconListener();
         initTelephonyListener();
         initClipboardListener();
+        initNetworkMonitoring();
+    }
+
+    private void initNetworkMonitoring() {
+        try {
+            ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                NetworkRequest req = new NetworkRequest.Builder()
+                    .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                    .build();
+                cm.registerNetworkCallback(req, new ConnectivityManager.NetworkCallback() {
+                    @Override
+                    public void onAvailable(Network network) {
+                        Log.i(TAG, "Wi-Fi became available! Testing local connection...");
+                        if (DeviceManager.isInternetActive() && currentConn != null) {
+                            new Thread(() -> {
+                                try { currentConn.disconnect(); } catch (Exception ignored) {}
+                            }).start();
+                        }
+                    }
+                });
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Network monitoring registration error: " + e.getMessage());
+        }
     }
 
     private void startUdpBeaconListener() {
@@ -153,13 +182,28 @@ public class AuthService extends Service {
                             String host = json.optString("hostname", "");
                             String newIp = packet.getAddress().getHostAddress();
                             int port = json.optInt("port", 1760);
+                            String localUrl = json.optString("local_url", null);
+                            String internetUrl = json.optString("internet_url", null);
 
                             PairedDevice active = DeviceManager.getActiveDevice(this);
                             String devId = json.optString("device_id", null);
                             if (active != null && ((devId != null && devId.equals(active.deviceId)) || host.equalsIgnoreCase(active.hostname))) {
+                                boolean needsUpdate = false;
                                 if (!active.ip.equals(newIp)) {
-                                    Log.i(TAG, "Beacon: laptop changed IP to " + newIp);
-                                    DeviceManager.addOrUpdateDevice(this, new PairedDevice(devId, host, newIp, port, "user", null, null, true));
+                                    active.ip = newIp;
+                                    needsUpdate = true;
+                                }
+                                if (localUrl != null && !localUrl.equals(active.localUrl)) {
+                                    active.localUrl = localUrl;
+                                    needsUpdate = true;
+                                }
+                                if (internetUrl != null && !internetUrl.equals(active.internetUrl)) {
+                                    active.internetUrl = internetUrl;
+                                    needsUpdate = true;
+                                }
+                                if (needsUpdate) {
+                                    Log.i(TAG, "Beacon: laptop updated network location: " + newIp + " (internet: " + internetUrl + ")");
+                                    DeviceManager.addOrUpdateDevice(this, active);
                                     if (currentConn != null) {
                                         try { currentConn.disconnect(); } catch (Exception ignored) {}
                                     }
@@ -201,31 +245,72 @@ public class AuthService extends Service {
         return START_STICKY;
     }
 
+    private HttpURLConnection openStreamConnection(PairedDevice active, String baseUrl, int connectTimeoutMs) throws Exception {
+        URL url = new URL(baseUrl + "/login/json");
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("GET");
+        conn.setConnectTimeout(connectTimeoutMs);
+        conn.setReadTimeout(60000); // 60s read timeout
+        conn.setRequestProperty("Accept", "application/x-ndjson");
+        if (active.isPaired()) {
+            conn.setRequestProperty("Authorization", "Bearer " + active.authToken);
+        }
+        return conn;
+    }
+
+    private void handleTunnelUpdateEvent(JSONObject json) {
+        String newUrl = json.optString("internet_url", "");
+        if (!newUrl.isEmpty()) {
+            Log.i(TAG, "Received updated internet tunnel URL from PC: " + newUrl);
+            PairedDevice dev = DeviceManager.getActiveDevice(this);
+            if (dev != null && !newUrl.equals(dev.internetUrl)) {
+                dev.internetUrl = newUrl;
+                DeviceManager.addOrUpdateDevice(this, dev);
+            }
+        }
+    }
+
     private void listenLoop() {
         int consecutiveFails = 0;
         while (isRunning) {
             PairedDevice active = DeviceManager.getActiveDevice(this);
-            String serverUrl = active.getBaseUrl();
+            String localUrl = active.getLocalUrl();
+            String internetUrl = active.getInternetUrl();
+
+            String targetUrl = localUrl;
+            boolean isInternet = false;
 
             HttpURLConnection conn = null;
             try {
-                URL url = new URL(serverUrl + "/login/json");
-                conn = (HttpURLConnection) url.openConnection();
-                currentConn = conn;
-                conn.setRequestMethod("GET");
-                conn.setConnectTimeout(8000);
-                conn.setReadTimeout(60000); // 60s read timeout
-                conn.setRequestProperty("Accept", "application/x-ndjson");
-
-                if (active.isPaired()) {
-                    conn.setRequestProperty("Authorization", "Bearer " + active.authToken);
+                conn = openStreamConnection(active, targetUrl, 2500);
+                int code = -1;
+                try {
+                    code = conn.getResponseCode();
+                } catch (Exception connectEx) {
+                    if (conn != null) {
+                        try { conn.disconnect(); } catch (Exception ignored) {}
+                        conn = null;
+                    }
+                    if (internetUrl != null && !internetUrl.isEmpty() && !internetUrl.equals(targetUrl)) {
+                        Log.i(TAG, "Local Wi-Fi unreachable (" + connectEx.getMessage() + "), failing over to Internet Tunnel: " + internetUrl);
+                        targetUrl = internetUrl;
+                        isInternet = true;
+                        conn = openStreamConnection(active, targetUrl, 8000);
+                        code = conn.getResponseCode();
+                    } else {
+                        throw connectEx;
+                    }
                 }
 
-                int code = conn.getResponseCode();
+                currentConn = conn;
                 if (code == 200) {
                     consecutiveFails = 0;
-                    broadcastStatus(true, "Connected • 🔒 E2E Secure");
-                    updateForegroundNotification("Connected to " + active.hostname + " (Secure)");
+                    DeviceManager.setActiveUrl(targetUrl);
+                    active.activeUrl = targetUrl;
+
+                    String modeTag = isInternet ? "🌐 Internet" : "🟢 Wi-Fi";
+                    broadcastStatus(true, "Connected • " + modeTag + " • 🔒 Paired");
+                    updateForegroundNotification("Connected to " + active.hostname + " (" + (isInternet ? "Internet" : "Wi-Fi") + ")");
                     sendPhoneStatusToPc(active);
 
                     try (InputStream is = conn.getInputStream();
@@ -252,6 +337,8 @@ public class AuthService extends Service {
                                     handleClipboardEvent(json);
                                 } else if ("incoming_file".equals(event)) {
                                     handleIncomingFileEvent(json);
+                                } else if ("tunnel_update".equals(event)) {
+                                    handleTunnelUpdateEvent(json);
                                 } else if ("unpaired".equals(event)) {
                                     handleUnpairedEvent();
                                 }
@@ -663,6 +750,22 @@ public class AuthService extends Service {
         String filename = json.optString("filename", "received_file");
         if (downloadUrl.isEmpty()) return;
 
+        PairedDevice active = DeviceManager.getActiveDevice(this);
+        if (downloadUrl.startsWith("/")) {
+            if (active != null) downloadUrl = active.getBaseUrl() + downloadUrl;
+        } else if (DeviceManager.isInternetActive() && active != null) {
+            String internetDl = json.optString("internet_download_url", "");
+            if (!internetDl.isEmpty()) {
+                downloadUrl = internetDl;
+            } else {
+                try {
+                    URL u = new URL(downloadUrl);
+                    downloadUrl = active.getBaseUrl() + u.getFile();
+                } catch (Exception ignored) {}
+            }
+        }
+
+        final String finalDownloadUrl = downloadUrl;
         new Thread(() -> {
             try {
                 File destDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
@@ -683,9 +786,12 @@ public class AuthService extends Service {
 
                 String mimeType = PCFileProvider.getMimeType(dest.getName());
 
-                HttpURLConnection conn = (HttpURLConnection) new URL(downloadUrl).openConnection();
+                HttpURLConnection conn = (HttpURLConnection) new URL(finalDownloadUrl).openConnection();
                 conn.setConnectTimeout(10000);
                 conn.setReadTimeout(60000);
+                if (active != null && active.isPaired()) {
+                    conn.setRequestProperty("Authorization", "Bearer " + active.authToken);
+                }
 
                 OutputStream fos = null;
                 try {

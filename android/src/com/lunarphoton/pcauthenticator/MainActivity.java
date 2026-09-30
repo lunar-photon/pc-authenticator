@@ -502,7 +502,8 @@ public class MainActivity extends Activity {
         PairedDevice active = DeviceManager.getActiveDevice(this);
 
         tvHostname.setText(active.hostname);
-        tvActiveIp.setText(active.getBaseUrl());
+        String modePrefix = DeviceManager.isInternetActive() ? "🌐 Internet: " : "🟢 Wi-Fi: ";
+        tvActiveIp.setText(modePrefix + active.getBaseUrl());
         tvDeviceCount.setText(devices.size() + " Saved");
 
         containerDevices.removeAllViews();
@@ -651,6 +652,10 @@ public class MainActivity extends Activity {
                                     device.secretKey = json.getString("secret_key");
                                     device.deviceId = json.optString("device_id", device.deviceId);
                                     device.hostname = json.optString("hostname", device.hostname);
+                                    String localUrl = json.optString("local_url", null);
+                                    String internetUrl = json.optString("internet_url", null);
+                                    if (localUrl != null) device.localUrl = localUrl;
+                                    if (internetUrl != null) device.internetUrl = internetUrl;
                                     DeviceManager.addOrUpdateDevice(MainActivity.this, device);
                                     DeviceManager.setActiveDevice(MainActivity.this, device.ip);
                                     reconnectService();
@@ -781,36 +786,61 @@ public class MainActivity extends Activity {
 
     private void testActiveConnection() {
         PairedDevice active = DeviceManager.getActiveDevice(this);
-        String url = active.getBaseUrl();
         tvStatusText.setText("Pinging " + active.hostname + "...");
         btnTestConnection.setEnabled(false);
 
         new Thread(() -> {
             long start = System.currentTimeMillis();
-            String res = NetworkUtils.httpGet(url + "/api/info", 4000);
+            String url = active.getBaseUrl();
+            String res = NetworkUtils.httpGet(url + "/api/info", 3000);
+            boolean isInternet = false;
+
+            if (res == null && active.getInternetUrl() != null && !url.equals(active.getInternetUrl())) {
+                url = active.getInternetUrl();
+                start = System.currentTimeMillis();
+                res = NetworkUtils.httpGet(url + "/api/info", 4500);
+                if (res != null) {
+                    isInternet = true;
+                    DeviceManager.setActiveUrl(url);
+                }
+            } else if (res != null) {
+                DeviceManager.setActiveUrl(url);
+                isInternet = url.startsWith("https://");
+            }
             long latency = System.currentTimeMillis() - start;
 
+            final String finalRes = res;
+            final boolean finalIsInternet = isInternet;
+            final String finalUrl = url;
             runOnUiThread(() -> {
                 btnTestConnection.setEnabled(true);
-                if (res != null) {
+                if (finalRes != null) {
                     try {
-                        JSONObject json = new JSONObject(res);
+                        JSONObject json = new JSONObject(finalRes);
                         String host = json.optString("hostname", active.hostname);
                         String devId = json.optString("device_id", null);
                         if (devId != null) active.deviceId = devId;
+                        String localUrl = json.optString("local_url", null);
+                        String internetUrl = json.optString("internet_url", null);
+                        if (localUrl != null) active.localUrl = localUrl;
+                        if (internetUrl != null) active.internetUrl = internetUrl;
+                        DeviceManager.addOrUpdateDevice(MainActivity.this, active);
+
                         tvHostname.setText(host);
+                        String modeTag = finalIsInternet ? "🌐 Internet" : "🟢 Wi-Fi";
                         if (active.isPaired()) {
-                            updateConnectionStatus(true, "Connected • 🔒 E2E Paired (" + latency + "ms)");
+                            updateConnectionStatus(true, "Connected • " + modeTag + " • 🔒 Paired (" + latency + "ms)");
                         } else {
-                            updateConnectionStatus(false, "Connected • ⚠️ Unpaired (Tap 'Pair 🔑' below)");
+                            updateConnectionStatus(false, "Connected • " + modeTag + " • ⚠️ Unpaired (Tap 'Pair 🔑' below)");
                         }
-                        Toast.makeText(MainActivity.this, "Connected to " + host + " (" + latency + "ms)", Toast.LENGTH_SHORT).show();
+                        tvActiveIp.setText(modeTag + ": " + finalUrl);
+                        Toast.makeText(MainActivity.this, "Connected to " + host + " (" + modeTag + ", " + latency + "ms)", Toast.LENGTH_SHORT).show();
                     } catch (Exception e) {
                         updateConnectionStatus(true, "Connected");
                     }
                 } else {
                     updateConnectionStatus(false, "Connection Failed");
-                    Toast.makeText(MainActivity.this, "Cannot connect to " + url, Toast.LENGTH_LONG).show();
+                    Toast.makeText(MainActivity.this, "Cannot connect to " + active.hostname + " via Wi-Fi or Internet", Toast.LENGTH_LONG).show();
                 }
             });
         }).start();
@@ -1697,6 +1727,20 @@ public class MainActivity extends Activity {
                         while ((line = r.readLine()) != null) sb.append(line);
                     }
                     JSONObject res = new JSONObject(sb.toString());
+                    String localUrl = res.optString("local_url", null);
+                    String internetUrl = res.optString("internet_url", null);
+                    boolean updated = false;
+                    if (localUrl != null && !localUrl.equals(active.localUrl)) {
+                        active.localUrl = localUrl;
+                        updated = true;
+                    }
+                    if (internetUrl != null && !internetUrl.equals(active.internetUrl)) {
+                        active.internetUrl = internetUrl;
+                        updated = true;
+                    }
+                    if (updated) {
+                        DeviceManager.addOrUpdateDevice(this, active);
+                    }
                     boolean locked = res.optBoolean("locked", false);
                     isPcCurrentlyLocked = locked;
                     JSONObject bat = res.optJSONObject("battery");
@@ -2135,6 +2179,9 @@ public class MainActivity extends Activity {
                 return;
             }
             String streamUrl = active.getBaseUrl() + "/api/files/download_pc?path=" + URLEncoder.encode(pcPath, "UTF-8");
+            if (active.isPaired()) {
+                streamUrl += "&token=" + active.authToken;
+            }
             String mimeType = PCFileProvider.getMimeType(filename);
             String lower = filename.toLowerCase();
             if (mimeType == null || "application/octet-stream".equals(mimeType)) {

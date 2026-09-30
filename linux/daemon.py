@@ -95,10 +95,25 @@ def get_auth_token_from_request(handler):
         return qs['token'][0].strip()
     return None
 
+def is_tunnel_request(handler):
+    headers = handler.headers
+    return bool(headers.get('CF-Ray') or headers.get('CF-Connecting-IP') or headers.get('CDN-Loop'))
+
+def get_effective_client_ip(handler):
+    if is_tunnel_request(handler):
+        cf_ip = handler.headers.get('CF-Connecting-IP')
+        if cf_ip:
+            return cf_ip.strip()
+        xff = handler.headers.get('X-Forwarded-For')
+        if xff:
+            return xff.split(',')[0].strip()
+    return handler.client_address[0]
+
 def authenticate_client(handler, cfg):
-    client_ip = handler.client_address[0]
-    # Local requests (e.g. from desktop tray or pc-connect CLI) are always authorized
-    if client_ip in ('127.0.0.1', '::1', 'localhost'):
+    client_ip = get_effective_client_ip(handler)
+    # Local requests (e.g. from desktop tray or pc-connect CLI) are always authorized,
+    # UNLESS they arrived through an external reverse proxy / Cloudflare tunnel!
+    if handler.client_address[0] in ('127.0.0.1', '::1', 'localhost') and not is_tunnel_request(handler):
         return {"client_name": "Local PC", "secret_key": "", "local": True}, "local"
 
     paired = cfg.get('paired_clients', {})
@@ -419,6 +434,10 @@ def get_pc_system_status():
     weather = get_weather_cached()
     weather_formatted = weather.get("formatted", "Weather Unavailable") if weather else "Weather Unavailable"
 
+    cfg = load_config()
+    port = cfg.get('web_port', 1760)
+    local_ip = get_local_ip()
+
     return {
         "status": "ok",
         "hostname": socket.gethostname(),
@@ -429,7 +448,9 @@ def get_pc_system_status():
         "uptime": uptime_info,
         "storage": storage_info,
         "weather": weather,
-        "weather_formatted": weather_formatted
+        "weather_formatted": weather_formatted,
+        "local_url": f"http://{local_ip}:{port}",
+        "internet_url": tunnel_mgr.get_url() if 'tunnel_mgr' in globals() else None
     }
 
 def capture_pc_screenshot():
@@ -1398,8 +1419,114 @@ class AuthManager:
 auth_mgr = AuthManager()
 
 # ==========================================
-# HTTP Request Handler
+# Cloudflare Internet Tunnel Manager
 # ==========================================
+
+class TunnelManager:
+    def __init__(self, port=1760):
+        self.port = port
+        self.tunnel_url = None
+        self.process = None
+        self.lock = threading.Lock()
+        self.running = False
+        self._thread = None
+
+    def _find_binary(self):
+        p = shutil.which('cloudflared')
+        if p and os.path.isfile(p):
+            return p
+        candidates = [
+            os.path.expanduser('~/.local/bin/cloudflared'),
+            '/usr/local/bin/cloudflared',
+            '/usr/bin/cloudflared',
+            os.path.join(BASE_DIR, 'cloudflared')
+        ]
+        for c in candidates:
+            if os.path.isfile(c) and os.access(c, os.X_OK):
+                return c
+        return None
+
+    def start(self):
+        cfg = load_config()
+        if not cfg.get("enable_internet_tunnel", True):
+            sys.stderr.write("🌐 Internet tunnel is disabled in config.json\n")
+            return
+        bin_path = self._find_binary()
+        if not bin_path:
+            sys.stderr.write("⚠️ cloudflared binary not found; internet tunnel disabled.\n")
+            return
+        if self.running and self._thread and self._thread.is_alive():
+            return
+        self.running = True
+        self._thread = threading.Thread(target=self._run_loop, args=(bin_path,), daemon=True)
+        self._thread.start()
+
+    def _run_loop(self, bin_path):
+        import re
+        url_regex = re.compile(r'(https://[a-zA-Z0-9-]+\.trycloudflare\.com)')
+        while self.running:
+            sys.stderr.write(f"🌐 Starting Cloudflare Quick Tunnel on port {self.port}...\n")
+            cmd = [bin_path, 'tunnel', '--url', f'http://127.0.0.1:{self.port}']
+            try:
+                self.process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1
+                )
+                for line in iter(self.process.stdout.readline, ''):
+                    if not self.running:
+                        break
+                    line_clean = line.strip()
+                    m = url_regex.search(line_clean)
+                    if m:
+                        new_url = m.group(1)
+                        with self.lock:
+                            changed = (self.tunnel_url != new_url)
+                            self.tunnel_url = new_url
+                        sys.stderr.write(f"\n==================================================\n")
+                        sys.stderr.write(f"🌐 Cloudflare Internet Tunnel ONLINE:\n")
+                        sys.stderr.write(f"   👉 {new_url}\n")
+                        sys.stderr.write(f"==================================================\n\n")
+                        sys.stderr.flush()
+                        if changed:
+                            try:
+                                auth_mgr.broadcast_ndjson(json.dumps({"event": "tunnel_update", "internet_url": new_url}) + "\n")
+                            except Exception:
+                                pass
+
+                self.process.wait()
+            except Exception as e:
+                sys.stderr.write(f"Tunnel process error: {e}\n")
+
+            if not self.running:
+                break
+            with self.lock:
+                self.tunnel_url = None
+            sys.stderr.write("🌐 Tunnel disconnected, restarting in 5s...\n")
+            time.sleep(5)
+
+    def get_url(self):
+        with self.lock:
+            return self.tunnel_url
+
+    def stop(self):
+        self.running = False
+        with self.lock:
+            self.tunnel_url = None
+        if self.process:
+            try:
+                self.process.terminate()
+                self.process.wait(timeout=3)
+            except Exception:
+                try:
+                    self.process.kill()
+                except Exception:
+                    pass
+            self.process = None
+
+tunnel_mgr = TunnelManager(port=1760)
 
 class AuthenticatorHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -1427,7 +1554,14 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             return
         elif path in ('/config', '/v1/config'):
             cfg = load_config()
-            self.send_json({"base_url": f"http://{get_local_ip()}:{cfg.get('web_port', 1760)}", "app_root": "/"})
+            port = cfg.get('web_port', 1760)
+            local_ip = get_local_ip()
+            self.send_json({
+                "base_url": f"http://{local_ip}:{port}",
+                "local_url": f"http://{local_ip}:{port}",
+                "internet_url": tunnel_mgr.get_url(),
+                "app_root": "/"
+            })
             return
         elif path.endswith('/auth'):
             topic_name = path.strip('/').split('/')[0] if '/' in path.strip('/') else "login"
@@ -1464,13 +1598,17 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
         # 4. Core APIs
         elif path == '/api/info':
             cfg = load_config()
+            port = cfg.get('web_port', 1760)
+            local_ip = get_local_ip()
             self.send_json({
                 "hostname": socket.gethostname(),
                 "device_id": get_laptop_id(),
                 "status": "ready",
                 "smart_dual_mode": True,
                 "offline_apk_ready": True,
-                "paired_clients_count": len(cfg.get('paired_clients', {}))
+                "paired_clients_count": len(cfg.get('paired_clients', {})),
+                "local_url": f"http://{local_ip}:{port}",
+                "internet_url": tunnel_mgr.get_url()
             })
             return
         elif path == '/api/events':
@@ -1571,6 +1709,11 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             return
 
         elif path == '/api/screen/screenshot':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
             data = capture_pc_screenshot()
             if data:
                 self.send_response(200)
@@ -1591,12 +1734,22 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             return
 
         elif path == '/api/files/search':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
             q = qs.get('q', [''])[0]
             results = search_laptop_files(q)
             self.send_json({"status": "ok", "query": q, "count": len(results), "results": results})
             return
 
         elif path == '/api/laptop/files/list':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
             req_path = unquote(qs.get('path', ['shortcuts'])[0])
             home = os.path.realpath(os.path.expanduser('~'))
             user = os.environ.get('USER', 'lunarphoton')
@@ -1736,6 +1889,11 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             return
 
         elif path in ('/api/files/download_pc', '/api/laptop/files/stream'):
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
             req_path = unquote(qs.get('path', [''])[0])
             req_path = os.path.realpath(os.path.expanduser(req_path))
             if not os.path.exists(req_path) or os.path.isdir(req_path):
@@ -1880,22 +2038,42 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
 
         # 7b. Camera Endpoints
         elif path == '/api/camera/devices':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
             devices = get_camera_devices()
             self.send_json({"devices": devices})
             return
 
         elif path == '/api/camera/snapshot':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
             device = qs.get('device', [''])[0]
             self.handle_camera_snapshot(device)
             return
 
         elif path == '/api/camera/stream':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
             device = qs.get('device', [''])[0]
             quality = qs.get('quality', ['smooth'])[0]
             self.handle_camera_stream(device, quality)
             return
 
         elif path == '/camera':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
             self.handle_camera_web_page()
             return
 
@@ -2068,11 +2246,11 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
                     "client_name": client_name,
                     "secret_key": secret_key,
                     "paired_at": time.time(),
-                    "ip": self.client_address[0]
+                    "ip": get_effective_client_ip(self)
                 }
                 save_config(cfg)
                 update_dolphin_servicemenu()
-                active_phone_state['ip'] = self.client_address[0]
+                active_phone_state['ip'] = get_effective_client_ip(self)
                 active_phone_state['client_name'] = client_name
                 active_phone_state['auth_token'] = auth_token
                 try:
@@ -2086,7 +2264,9 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
                     "auth_token": auth_token,
                     "secret_key": secret_key,
                     "device_id": get_laptop_id(),
-                    "hostname": socket.gethostname()
+                    "hostname": socket.gethostname(),
+                    "local_url": f"http://{get_local_ip()}:{cfg.get('web_port', 1760)}",
+                    "internet_url": tunnel_mgr.get_url()
                 })
 
         elif path in ('/api/approve_current', '/api/approve'):
@@ -2200,7 +2380,7 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
                 active_phone_state['storage_free'] = body.get('storage_free')
             if 'storage_total' in body:
                 active_phone_state['storage_total'] = body.get('storage_total')
-            active_phone_state['ip'] = self.client_address[0]
+            active_phone_state['ip'] = get_effective_client_ip(self)
             active_phone_state['last_seen'] = time.time()
             self.send_json({"status": "ok"})
 
@@ -2208,7 +2388,8 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
         elif path == '/api/clipboard':
             global _last_phone_clipboard, _last_pc_clipboard
             text = body.get('text', '')
-            if not text and self.client_address[0] in ('127.0.0.1', '::1', 'localhost'):
+            is_local = (self.client_address[0] in ('127.0.0.1', '::1', 'localhost')) and not is_tunnel_request(self)
+            if not text and is_local:
                 text = get_kde_clipboard()
                 if text:
                     with _clipboard_lock:
@@ -2220,35 +2401,60 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
                     _last_pc_clipboard = text
                 set_kde_clipboard(text)
                 # If triggered from local PC, broadcast to phone
-                if self.client_address[0] in ('127.0.0.1', '::1', 'localhost'):
+                if is_local:
                     auth_mgr.broadcast_ndjson(json.dumps({"event": "clipboard", "text": text}) + "\n")
             self.send_json({"status": "ok"})
 
         # 6. Media Control
         elif path == '/api/media/command':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
             cmd = body.get('command', '')
             success = send_mpris_command(cmd)
             self.send_json({"status": "ok" if success else "failed"})
 
         # 7. Ping (Ring PC)
         elif path == '/api/ping':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
             ping_pc()
             self.send_json({"status": "ok"})
 
         # 8. Ring (Find My Phone)
         elif path == '/api/ring':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
             phone_ip = body.get('phone_ip') or active_phone_state.get('ip')
             ring_phone(phone_ip=phone_ip)
             self.send_json({"status": "ok"})
 
         # 8b. Stop Ringing (Find My Phone)
         elif path == '/api/unring':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
             phone_ip = body.get('phone_ip') or active_phone_state.get('ip')
             unring_phone(phone_ip=phone_ip)
             self.send_json({"status": "ok"})
 
         # 9. Remote Action (Lock, Suspend, Screen off)
         elif path == '/api/action':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
             act = body.get('action', '')
             if act == 'lock':
                 subprocess.Popen(['loginctl', 'lock-session'])
@@ -2322,13 +2528,23 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             cfg = load_config()
             port = cfg.get('web_port', 1760)
             dl_url = f"http://{local_ip}:{port}/api/files/staging/{token}"
+            tunnel_url = tunnel_mgr.get_url()
+            internet_dl_url = f"{tunnel_url}/api/files/staging/{token}" if tunnel_url else None
             auth_mgr.broadcast_ndjson(json.dumps({
                 "event": "incoming_file",
                 "filename": fn,
                 "download_url": dl_url,
+                "internet_download_url": internet_dl_url,
+                "staging_path": f"/api/files/staging/{token}",
                 "size": size
             }) + "\n")
-            self.send_json({"status": "ok", "token": token, "download_url": dl_url})
+            self.send_json({
+                "status": "ok",
+                "token": token,
+                "download_url": dl_url,
+                "internet_download_url": internet_dl_url,
+                "staging_path": f"/api/files/staging/{token}"
+            })
 
         # 11. Phone Filesystem Mutations (Proxy)
         elif path == '/api/phone/files/delete':
@@ -2803,7 +3019,9 @@ def start_udp_discovery_server(port):
                     "hostname": socket.gethostname(),
                     "ip": local_ip,
                     "port": port,
-                    "user": os.environ.get("USER", "lunarphoton")
+                    "user": os.environ.get("USER", "lunarphoton"),
+                    "local_url": f"http://{local_ip}:{port}",
+                    "internet_url": tunnel_mgr.get_url()
                 }
                 try:
                     sock.sendto(json.dumps(reply).encode('utf-8'), addr)
@@ -2830,7 +3048,9 @@ def start_udp_beacon(port):
                     "hostname": socket.gethostname(),
                     "ip": local_ip,
                     "port": port,
-                    "user": os.environ.get("USER", "lunarphoton")
+                    "user": os.environ.get("USER", "lunarphoton"),
+                    "local_url": f"http://{local_ip}:{port}",
+                    "internet_url": tunnel_mgr.get_url()
                 }).encode('utf-8')
 
                 try:
@@ -2883,6 +3103,9 @@ def main():
     start_udp_mouse_listener(1762)
     start_clipboard_monitor(auth_mgr)
 
+    tunnel_mgr.port = port
+    tunnel_mgr.start()
+
     server = ThreadingHTTPServer(('0.0.0.0', port), AuthenticatorHandler)
     sys.stderr.write("==================================================\n")
     sys.stderr.write(f"  PC Connect & Authenticator Daemon Running (Port {port})\n")
@@ -2897,6 +3120,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        tunnel_mgr.stop()
         server.server_close()
 
 if __name__ == '__main__':

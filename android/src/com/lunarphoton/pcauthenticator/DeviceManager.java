@@ -28,6 +28,20 @@ public class DeviceManager {
     private static final String DEFAULT_IP = "192.168.48.40";
     private static final int DEFAULT_PORT = 1760;
 
+    private static volatile String activeUrlOverride = null;
+
+    public static void setActiveUrl(String url) {
+        activeUrlOverride = (url != null && !url.isEmpty()) ? url.trim() : null;
+    }
+
+    public static String getActiveUrl() {
+        return activeUrlOverride;
+    }
+
+    public static boolean isInternetActive() {
+        return activeUrlOverride != null && activeUrlOverride.startsWith("https://");
+    }
+
     public interface DiscoveryCallback {
         void onDiscovered(PairedDevice device);
         void onFinished(List<PairedDevice> allFound);
@@ -121,6 +135,12 @@ public class DeviceManager {
             if (newDevice.secretKey != null && !newDevice.secretKey.isEmpty()) {
                 matched.secretKey = newDevice.secretKey;
             }
+            if (newDevice.localUrl != null && !newDevice.localUrl.isEmpty()) {
+                matched.localUrl = newDevice.localUrl;
+            }
+            if (newDevice.internetUrl != null && !newDevice.internetUrl.isEmpty()) {
+                matched.internetUrl = newDevice.internetUrl;
+            }
 
             // Consolidate list: remove any other duplicate entries for this device
             for (int i = list.size() - 1; i >= 0; i--) {
@@ -154,6 +174,8 @@ public class DeviceManager {
                 def.ip = newDevice.ip;
                 def.port = newDevice.port;
                 def.hostname = newDevice.hostname;
+                def.localUrl = newDevice.localUrl;
+                def.internetUrl = newDevice.internetUrl;
                 def.isActive = true;
                 setActiveDevice(context, def.ip);
                 return def;
@@ -259,9 +281,11 @@ public class DeviceManager {
                             if (res != null) {
                                 try {
                                     JSONObject json = new JSONObject(res);
-                                    String host = json.optString("hostname", "Laptop");
+                                     String host = json.optString("hostname", "Laptop");
                                     String devId = json.optString("device_id", null);
-                                    PairedDevice dev = new PairedDevice(devId, host, testIp, DEFAULT_PORT, "user", null, null, false);
+                                    String localUrl = json.optString("local_url", null);
+                                    String internetUrl = json.optString("internet_url", null);
+                                    PairedDevice dev = new PairedDevice(devId, host, testIp, DEFAULT_PORT, "user", null, null, false, localUrl, internetUrl);
                                     synchronized (discovered) {
                                         boolean duplicate = false;
                                         for (PairedDevice d : discovered) {
@@ -295,8 +319,10 @@ public class DeviceManager {
                             String ip = recvPacket.getAddress().getHostAddress();
                             int port = json.optInt("port", DEFAULT_PORT);
                             String user = json.optString("user", "user");
+                            String localUrl = json.optString("local_url", null);
+                            String internetUrl = json.optString("internet_url", null);
 
-                            PairedDevice dev = new PairedDevice(devId, host, ip, port, user, null, null, false);
+                            PairedDevice dev = new PairedDevice(devId, host, ip, port, user, null, null, false, localUrl, internetUrl);
                             synchronized (discovered) {
                                 boolean duplicate = false;
                                 for (PairedDevice d : discovered) {
