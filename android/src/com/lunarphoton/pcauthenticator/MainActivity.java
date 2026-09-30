@@ -29,7 +29,9 @@ import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.WindowManager;
+import android.text.InputType;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.Switch;
@@ -78,10 +80,8 @@ public class MainActivity extends Activity {
     private Button btnSendClipToPc;
     private Button btnGetClipFromPc;
     private Button btnRingPc;
-    private Button btnLockPc;
     private Button btnRemoteTrackpad;
     private Button btnCameraView;
-    private Button btnOpenWebpage;
 
     private TextView tvMediaStatus;
     private TextView tvMediaTitle;
@@ -198,10 +198,8 @@ public class MainActivity extends Activity {
         btnSendClipToPc = findViewById(R.id.btn_send_clip_to_pc);
         btnGetClipFromPc = findViewById(R.id.btn_get_clip_from_pc);
         btnRingPc = findViewById(R.id.btn_ring_pc);
-        btnLockPc = findViewById(R.id.btn_lock_pc);
         btnRemoteTrackpad = findViewById(R.id.btn_remote_trackpad);
         btnCameraView = findViewById(R.id.btn_camera_view);
-        btnOpenWebpage = findViewById(R.id.btn_open_webpage);
 
         tvMediaStatus = findViewById(R.id.tv_media_status);
         tvMediaTitle = findViewById(R.id.tv_media_title);
@@ -228,7 +226,13 @@ public class MainActivity extends Activity {
         btnSearchFilesAction = findViewById(R.id.btn_search_files_action);
 
         if (btnLockLaptopAction != null) {
-            btnLockLaptopAction.setOnClickListener(v -> confirmAndLockPc());
+            btnLockLaptopAction.setOnClickListener(v -> {
+                if (isPcCurrentlyLocked) {
+                    onUnlockButtonClicked();
+                } else {
+                    lockPc();
+                }
+            });
         }
         if (btnScreenshotAction != null) {
             btnScreenshotAction.setOnClickListener(v -> showScreenshotDialog());
@@ -1158,7 +1162,6 @@ public class MainActivity extends Activity {
         if (btnSendClipToPc != null) btnSendClipToPc.setOnClickListener(v -> sendPhoneClipboardToPc());
         if (btnGetClipFromPc != null) btnGetClipFromPc.setOnClickListener(v -> fetchPcClipboard());
         if (btnRingPc != null) btnRingPc.setOnClickListener(v -> ringPc());
-        if (btnLockPc != null) btnLockPc.setOnClickListener(v -> lockPc());
         if (btnRemoteTrackpad != null) {
             btnRemoteTrackpad.setOnClickListener(v -> {
                 Intent intent = new Intent(MainActivity.this, TrackpadActivity.class);
@@ -1170,9 +1173,6 @@ public class MainActivity extends Activity {
                 Intent intent = new Intent(MainActivity.this, CameraActivity.class);
                 startActivity(intent);
             });
-        }
-        if (btnOpenWebpage != null) {
-            btnOpenWebpage.setOnClickListener(v -> showOpenWebpageDialog());
         }
 
         if (btnMediaPlayPause != null) btnMediaPlayPause.setOnClickListener(v -> sendMediaCommand("PlayPause"));
@@ -1369,28 +1369,18 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private void confirmAndLockPc() {
-        if (isPcCurrentlyLocked) {
-            Toast.makeText(this, "🔒 Laptop is already locked", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        new AlertDialog.Builder(this)
-                .setTitle("🔒 Lock Laptop Screen")
-                .setMessage("Are you sure you want to lock your laptop screen now?")
-                .setPositiveButton("Lock Screen", (dialog, which) -> lockPc())
-                .setNegativeButton("Cancel", null)
-                .show();
-    }
-
     private void lockPc() {
+        Toast.makeText(this, "🔒 Locking laptop...", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             try {
                 PairedDevice active = DeviceManager.getActiveDevice(this);
+                if (active == null) return;
                 String url = active.getBaseUrl() + "/api/action";
                 HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json");
+                conn.setConnectTimeout(4000);
+                conn.setReadTimeout(4000);
                 conn.setDoOutput(true);
                 if (active.isPaired()) {
                     conn.setRequestProperty("Authorization", "Bearer " + active.authToken);
@@ -1400,6 +1390,7 @@ public class MainActivity extends Activity {
                     os.write(body.toString().getBytes("UTF-8"));
                 }
                 int code = conn.getResponseCode();
+                conn.disconnect();
                 runOnUiThread(() -> {
                     if (code == 200) {
                         isPcCurrentlyLocked = true;
@@ -1407,9 +1398,273 @@ public class MainActivity extends Activity {
                             tvPcLockBadge.setText("🔒 Locked");
                             tvPcLockBadge.setTextColor(Color.parseColor("#bf616a"));
                         }
+                        if (btnLockLaptopAction != null) {
+                            btnLockLaptopAction.setText("🔓 Unlock Screen");
+                            btnLockLaptopAction.setBackgroundResource(R.drawable.btn_approve);
+                        }
                         Toast.makeText(MainActivity.this, "🔒 Laptop screen locked!", Toast.LENGTH_SHORT).show();
                     } else {
                         Toast.makeText(MainActivity.this, "❌ Failed to lock (HTTP " + code + ")", Toast.LENGTH_SHORT).show();
+                    }
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "❌ Error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+            }
+        }).start();
+    }
+
+    private void onUnlockButtonClicked() {
+        SharedPreferences prefs = getSharedPreferences("pc_auth_prefs", Context.MODE_PRIVATE);
+        String savedPwd = prefs.getString("saved_laptop_password", null);
+        if (savedPwd != null && !savedPwd.isEmpty() && isBiometricRequiredAndSupported()) {
+            promptBiometricForSavedPassword(savedPwd);
+        } else {
+            showUnlockPasswordDialog();
+        }
+    }
+
+    private void promptBiometricForSavedPassword(String savedPassword) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            executeUnlockPc(savedPassword);
+            return;
+        }
+
+        cancelBiometricPrompt();
+        cancellationSignal = new CancellationSignal();
+        isPromptShowing = true;
+
+        PairedDevice active = DeviceManager.getActiveDevice(this);
+
+        try {
+            BiometricPrompt.Builder builder = new BiometricPrompt.Builder(this)
+                    .setTitle("🔓 Unlock Laptop")
+                    .setSubtitle("Confirm fingerprint to unlock " + (active != null ? active.hostname : "laptop"))
+                    .setNegativeButton("Enter Password", getMainExecutor(), (dialog, which) -> {
+                        isPromptShowing = false;
+                        cancellationSignal = null;
+                        showUnlockPasswordDialog();
+                    });
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                builder.setConfirmationRequired(false);
+            }
+
+            BiometricPrompt prompt = builder.build();
+            prompt.authenticate(
+                    cancellationSignal,
+                    getMainExecutor(),
+                    new BiometricPrompt.AuthenticationCallback() {
+                        @Override
+                        public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
+                            super.onAuthenticationSucceeded(result);
+                            isPromptShowing = false;
+                            cancellationSignal = null;
+                            executeUnlockPc(savedPassword);
+                        }
+
+                        @Override
+                        public void onAuthenticationError(int errorCode, CharSequence errString) {
+                            super.onAuthenticationError(errorCode, errString);
+                            isPromptShowing = false;
+                            cancellationSignal = null;
+                            if (errorCode != BiometricPrompt.BIOMETRIC_ERROR_CANCELED &&
+                                errorCode != BiometricPrompt.BIOMETRIC_ERROR_USER_CANCELED) {
+                                showUnlockPasswordDialog();
+                            }
+                        }
+
+                        @Override
+                        public void onAuthenticationFailed() {
+                            super.onAuthenticationFailed();
+                            vibrate(100);
+                        }
+                    }
+            );
+        } catch (Exception e) {
+            isPromptShowing = false;
+            cancellationSignal = null;
+            showUnlockPasswordDialog();
+        }
+    }
+
+    private void showUnlockPasswordDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("🔓 Unlock Laptop Screen");
+
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(60, 30, 60, 10);
+
+        TextView tvHint = new TextView(this);
+        tvHint.setText("Enter your laptop password to unlock:");
+        tvHint.setTextColor(Color.parseColor("#d8dee9"));
+        tvHint.setTextSize(13);
+        layout.addView(tvHint);
+
+        EditText etPassword = new EditText(this);
+        etPassword.setHint("Laptop password");
+        etPassword.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        etPassword.setTextColor(Color.WHITE);
+        etPassword.setHintTextColor(Color.parseColor("#4c566a"));
+        layout.addView(etPassword);
+
+        CheckBox cbRemember = new CheckBox(this);
+        cbRemember.setText("Save password for fingerprint unlock");
+        cbRemember.setTextColor(Color.parseColor("#d8dee9"));
+        cbRemember.setTextSize(12);
+        cbRemember.setChecked(true);
+        if (isBiometricRequiredAndSupported()) {
+            layout.addView(cbRemember);
+        }
+
+        builder.setView(layout);
+        builder.setPositiveButton("🔓 Unlock", (dialog, which) -> {
+            String pwd = etPassword.getText().toString().trim();
+            if (pwd.isEmpty()) {
+                Toast.makeText(MainActivity.this, "Please enter your password", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            if (isBiometricRequiredAndSupported()) {
+                promptBiometricForUnlock(pwd, cbRemember.isChecked());
+            } else {
+                if (cbRemember.isChecked()) {
+                    getSharedPreferences("pc_auth_prefs", Context.MODE_PRIVATE)
+                            .edit().putString("saved_laptop_password", pwd).apply();
+                }
+                executeUnlockPc(pwd);
+            }
+        });
+        builder.setNegativeButton("Cancel", null);
+
+        AlertDialog dialog = builder.create();
+        dialog.show();
+        etPassword.requestFocus();
+    }
+
+    private void promptBiometricForUnlock(String password, boolean rememberChecked) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            if (rememberChecked) {
+                getSharedPreferences("pc_auth_prefs", Context.MODE_PRIVATE)
+                        .edit().putString("saved_laptop_password", password).apply();
+            }
+            executeUnlockPc(password);
+            return;
+        }
+
+        cancelBiometricPrompt();
+        cancellationSignal = new CancellationSignal();
+        isPromptShowing = true;
+
+        PairedDevice active = DeviceManager.getActiveDevice(this);
+
+        try {
+            BiometricPrompt.Builder builder = new BiometricPrompt.Builder(this)
+                    .setTitle("🔓 Authorize Laptop Unlock")
+                    .setSubtitle("Confirm your fingerprint to unlock laptop screen")
+                    .setDescription("Authorize unlock for " + (active != null ? active.hostname : "Laptop"))
+                    .setNegativeButton("Cancel", getMainExecutor(), (dialog, which) -> {
+                        isPromptShowing = false;
+                        cancellationSignal = null;
+                    });
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                builder.setConfirmationRequired(false);
+            }
+
+            BiometricPrompt prompt = builder.build();
+            prompt.authenticate(
+                    cancellationSignal,
+                    getMainExecutor(),
+                    new BiometricPrompt.AuthenticationCallback() {
+                        @Override
+                        public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
+                            super.onAuthenticationSucceeded(result);
+                            isPromptShowing = false;
+                            cancellationSignal = null;
+                            if (rememberChecked) {
+                                getSharedPreferences("pc_auth_prefs", Context.MODE_PRIVATE)
+                                        .edit().putString("saved_laptop_password", password).apply();
+                            }
+                            executeUnlockPc(password);
+                        }
+
+                        @Override
+                        public void onAuthenticationError(int errorCode, CharSequence errString) {
+                            super.onAuthenticationError(errorCode, errString);
+                            isPromptShowing = false;
+                            cancellationSignal = null;
+                            if (errorCode != BiometricPrompt.BIOMETRIC_ERROR_CANCELED &&
+                                errorCode != BiometricPrompt.BIOMETRIC_ERROR_USER_CANCELED) {
+                                Toast.makeText(MainActivity.this, "Authentication failed: " + errString, Toast.LENGTH_SHORT).show();
+                            }
+                        }
+
+                        @Override
+                        public void onAuthenticationFailed() {
+                            super.onAuthenticationFailed();
+                            vibrate(100);
+                        }
+                    }
+            );
+        } catch (Exception e) {
+            isPromptShowing = false;
+            cancellationSignal = null;
+            if (rememberChecked) {
+                getSharedPreferences("pc_auth_prefs", Context.MODE_PRIVATE)
+                        .edit().putString("saved_laptop_password", password).apply();
+            }
+            executeUnlockPc(password);
+        }
+    }
+
+    private void executeUnlockPc(String password) {
+        Toast.makeText(this, "🔓 Unlocking laptop...", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            try {
+                PairedDevice active = DeviceManager.getActiveDevice(this);
+                if (active == null) return;
+                String url = active.getBaseUrl() + "/api/action";
+                HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setConnectTimeout(6000);
+                conn.setReadTimeout(6000);
+                if (active.isPaired()) {
+                    conn.setRequestProperty("Authorization", "Bearer " + active.authToken);
+                }
+                conn.setDoOutput(true);
+                JSONObject body = new JSONObject();
+                body.put("action", "unlock");
+                if (password != null && !password.isEmpty()) {
+                    body.put("password", password);
+                }
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write(body.toString().getBytes("UTF-8"));
+                }
+                int code = conn.getResponseCode();
+                conn.disconnect();
+
+                runOnUiThread(() -> {
+                    if (code == 200) {
+                        isPcCurrentlyLocked = false;
+                        if (tvPcLockBadge != null) {
+                            tvPcLockBadge.setText("🔓 Unlocked");
+                            tvPcLockBadge.setTextColor(Color.parseColor("#a3be8c"));
+                        }
+                        if (btnLockLaptopAction != null) {
+                            btnLockLaptopAction.setText("🔒 Lock Screen");
+                            btnLockLaptopAction.setBackgroundResource(R.drawable.btn_deny);
+                        }
+                        hideChallenge();
+                        AuthService.cancelChallengeNotification(MainActivity.this);
+                        Toast.makeText(MainActivity.this, "✅ Laptop screen unlocked!", Toast.LENGTH_SHORT).show();
+                    } else if (code == 401) {
+                        Toast.makeText(MainActivity.this, "❌ Incorrect password. Please try again.", Toast.LENGTH_LONG).show();
+                        getSharedPreferences("pc_auth_prefs", Context.MODE_PRIVATE)
+                                .edit().remove("saved_laptop_password").apply();
+                        showUnlockPasswordDialog();
+                    } else {
+                        Toast.makeText(MainActivity.this, "❌ Failed to unlock (HTTP " + code + ")", Toast.LENGTH_SHORT).show();
                     }
                 });
             } catch (Exception e) {
@@ -1474,11 +1729,22 @@ public class MainActivity extends Activity {
                                 tvPcLockBadge.setTextColor(Color.parseColor("#a3be8c"));
                             }
                         }
+                        if (btnLockLaptopAction != null) {
+                            if (locked) {
+                                btnLockLaptopAction.setText("🔓 Unlock Screen");
+                                btnLockLaptopAction.setBackgroundResource(R.drawable.btn_approve);
+                            } else {
+                                btnLockLaptopAction.setText("🔒 Lock Screen");
+                                btnLockLaptopAction.setBackgroundResource(R.drawable.btn_deny);
+                            }
+                        }
                         if (tvPcBattery != null && bat != null) {
-                            int pct = bat.optInt("percent", -1);
-                            boolean charging = bat.optBoolean("charging", false);
+                            int pct = bat.optInt("capacity", bat.optInt("percent", -1));
+                            String st = bat.optString("status", "");
+                            boolean charging = bat.optBoolean("charging", false) || "Charging".equalsIgnoreCase(st);
+                            boolean ac = bat.optBoolean("ac_online", false);
                             if (pct >= 0) {
-                                tvPcBattery.setText("🔋 Battery: " + pct + "%" + (charging ? " (⚡)" : ""));
+                                tvPcBattery.setText("🔋 Battery: " + pct + "%" + (charging ? " (⚡ Charging)" : (ac ? " (⚡ Plugged in)" : "")));
                             }
                         }
                         if (tvPcUptime != null && up != null) {

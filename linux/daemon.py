@@ -349,13 +349,17 @@ def get_pc_system_status():
     locked = is_pc_locked()
 
     import glob
-    bat_info = {"capacity": None, "status": "Unknown", "ac_online": False}
+    bat_info = {"capacity": None, "percent": None, "status": "Unknown", "charging": False, "ac_online": False}
     for p in glob.glob('/sys/class/power_supply/BAT*'):
         try:
             with open(os.path.join(p, 'capacity')) as f:
-                bat_info['capacity'] = int(f.read().strip())
+                c = int(f.read().strip())
+                bat_info['capacity'] = c
+                bat_info['percent'] = c
             with open(os.path.join(p, 'status')) as f:
-                bat_info['status'] = f.read().strip()
+                st = f.read().strip()
+                bat_info['status'] = st
+                bat_info['charging'] = (st.lower() == 'charging')
             break
         except Exception:
             pass
@@ -2146,7 +2150,42 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             act = body.get('action', '')
             if act == 'lock':
                 subprocess.Popen(['loginctl', 'lock-session'])
+                try:
+                    subprocess.run(['qdbus6', 'org.freedesktop.ScreenSaver', '/ScreenSaver', 'org.freedesktop.ScreenSaver.Lock'], stderr=subprocess.DEVNULL)
+                except Exception:
+                    pass
                 self.send_json({"status": "ok", "action": "lock"})
+            elif act == 'unlock':
+                pwd = body.get('password', '')
+                user = os.environ.get('USER', 'lunarphoton')
+                # If password was provided, verify it with unix_chkpwd
+                if pwd:
+                    try:
+                        p = subprocess.Popen(['unix_chkpwd', user, 'nullok'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                        out, err = p.communicate(pwd.encode('utf-8') + b'\x00', timeout=3)
+                        if p.returncode != 0:
+                            self.send_json({"status": "error", "message": "Incorrect password"}, status=401)
+                            return
+                    except Exception as e:
+                        self.send_json({"status": "error", "message": f"Verification error: {str(e)}"}, status=500)
+                        return
+
+                # Also approve any pending 2FA challenge if active
+                with auth_mgr.lock:
+                    if auth_mgr.current_session and auth_mgr.current_session["status"] == "pending":
+                        auth_mgr.approve_current()
+
+                # Unlock session via loginctl and ScreenSaver D-Bus
+                subprocess.Popen(['loginctl', 'unlock-session'])
+                try:
+                    subprocess.run(['qdbus6', 'org.freedesktop.ScreenSaver', '/ScreenSaver', 'org.freedesktop.ScreenSaver.SetActive', 'false'], stderr=subprocess.DEVNULL)
+                except Exception:
+                    pass
+                try:
+                    subprocess.Popen(['notify-send', '-i', 'system-lock-screen', '-a', 'PC Connect', 'PC Unlocked', 'Screen unlocked remotely from phone'], stderr=subprocess.DEVNULL)
+                except Exception:
+                    pass
+                self.send_json({"status": "ok", "action": "unlock"})
             elif act == 'suspend':
                 subprocess.Popen(['systemctl', 'suspend'])
                 self.send_json({"status": "ok", "action": "suspend"})

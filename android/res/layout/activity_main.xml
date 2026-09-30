@@ -407,34 +407,15 @@
                     android:layout_marginStart="4dp" />
             </LinearLayout>
 
-            <LinearLayout
+            <Button
+                android:id="@+id/btn_ring_pc"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginTop="8dp">
-
-                <Button
-                    android:id="@+id/btn_ring_pc"
-                    android:layout_width="0dp"
-                    android:layout_height="40dp"
-                    android:layout_weight="1"
-                    android:text="🔔 Ring Laptop"
-                    android:textSize="12sp"
-                    android:textColor="@color/text_white"
-                    android:background="@drawable/card_bg"
-                    android:layout_marginEnd="4dp" />
-
-                <Button
-                    android:id="@+id/btn_lock_pc"
-                    android:layout_width="0dp"
-                    android:layout_height="40dp"
-                    android:layout_weight="1"
-                    android:text="🔒 Lock PC"
-                    android:textSize="12sp"
-                    android:textColor="@color/text_white"
-                    android:background="@drawable/card_bg"
-                    android:layout_marginStart="4dp" />
-            </LinearLayout>
+                android:layout_height="40dp"
+                android:text="🔔 Ring Laptop"
+                android:textSize="12sp"
+                android:textColor="@color/text_white"
+                android:background="@drawable/card_bg"
+                android:layout_marginTop="8dp" />
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -466,16 +447,6 @@
                     android:background="@drawable/card_bg"
                     android:layout_marginStart="4dp" />
             </LinearLayout>
-
-            <Button
-                android:id="@+id/btn_open_webpage"
-                android:layout_width="match_parent"
-                android:layout_height="40dp"
-                android:text="🌐 Open Webpage on PC"
-                android:textSize="12sp"
-                android:textColor="@color/text_white"
-                android:background="@drawable/card_bg"
-                android:layout_marginTop="8dp" />
         </LinearLayout>
 
         <!-- Media Player Remote Card -->
