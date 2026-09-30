@@ -165,7 +165,7 @@ X-KDE-ServiceTypes=KonqPopupMenu/Plugin
 MimeType=all/all;all/allfiles;inode/directory;application/octet-stream;
 Actions=sendToDevice;
 X-KDE-Priority=TopLevel
-X-KDE-Submenu={dev_name}
+X-KDE-Submenu=PC Connect
 
 [Desktop Action sendToDevice]
 Name=Send to {dev_name}
@@ -473,6 +473,15 @@ def search_laptop_files(query, max_results=50):
         os.path.expanduser('~/Desktop'),
         os.path.expanduser('~')
     ]
+    user = os.environ.get('USER', 'lunarphoton')
+    for mdir in [f'/run/media/{user}', f'/media/{user}', '/media', '/mnt']:
+        if os.path.exists(mdir):
+            try:
+                for entry in os.scandir(mdir):
+                    if entry.is_dir():
+                        base_dirs.append(entry.path)
+            except Exception:
+                pass
     skip_dirs = {'.git', '.cache', 'node_modules', '.venv', '__pycache__', '.local', '.cargo', '.npm', '.rustup', '.gradle'}
     seen_paths = set()
     results = []
@@ -1590,10 +1599,90 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
         elif path == '/api/laptop/files/list':
             req_path = unquote(qs.get('path', ['shortcuts'])[0])
             home = os.path.realpath(os.path.expanduser('~'))
+            user = os.environ.get('USER', 'lunarphoton')
+
+            # Discover mounted drives
+            mounted_drives = []
+            seen_mounts = set()
+            for mdir in [f'/run/media/{user}', f'/media/{user}', '/media', '/mnt']:
+                if os.path.exists(mdir):
+                    try:
+                        for entry in os.scandir(mdir):
+                            if entry.is_dir():
+                                rp = os.path.realpath(entry.path)
+                                if rp not in seen_mounts:
+                                    seen_mounts.add(rp)
+                                    drive_size = "Mounted Drive"
+                                    try:
+                                        du = shutil.disk_usage(rp)
+                                        drive_size = f"{round(du.free / (1024**3), 1)} GB free / {round(du.total / (1024**3), 1)} GB"
+                                    except Exception:
+                                        pass
+                                    mounted_drives.append({
+                                        "name": f"💾 {entry.name}",
+                                        "path": entry.path,
+                                        "is_dir": True,
+                                        "icon": "💾",
+                                        "size_formatted": drive_size
+                                    })
+                    except Exception:
+                        pass
+
+            try:
+                du_root = shutil.disk_usage('/')
+                root_size = f"{round(du_root.free / (1024**3), 1)} GB free / {round(du_root.total / (1024**3), 1)} GB"
+            except Exception:
+                root_size = "Root Filesystem"
+            mounted_drives.append({
+                "name": "💽 System Root (/)",
+                "path": "/",
+                "is_dir": True,
+                "icon": "💽",
+                "size_formatted": root_size
+            })
 
             storage_info = {"total_gb": 0, "used_gb": 0, "free_gb": 0, "used_pct": 0, "formatted": "--"}
+
+            if req_path in ('', 'shortcuts'):
+                try:
+                    du = shutil.disk_usage(home)
+                    storage_info = {
+                        "total_gb": round(du.total / (1024**3), 1),
+                        "used_gb": round(du.used / (1024**3), 1),
+                        "free_gb": round(du.free / (1024**3), 1),
+                        "used_pct": round((du.used / du.total) * 100.0, 1),
+                        "formatted": f"{round(du.free / (1024**3), 1)} GB free / {round(du.total / (1024**3), 1)} GB ({round((du.used / du.total) * 100.0)}%)"
+                    }
+                except Exception:
+                    pass
+
+                shortcuts = [
+                    {"name": "🏠 Home", "path": home, "is_dir": True, "icon": "🏠", "size_formatted": "Folder"},
+                    {"name": "📥 Downloads", "path": os.path.join(home, "Downloads"), "is_dir": True, "icon": "📥", "size_formatted": "Folder"},
+                    {"name": "📄 Documents", "path": os.path.join(home, "Documents"), "is_dir": True, "icon": "📄", "size_formatted": "Folder"},
+                    {"name": "🖼️ Pictures", "path": os.path.join(home, "Pictures"), "is_dir": True, "icon": "🖼️", "size_formatted": "Folder"},
+                    {"name": "🎬 Videos", "path": os.path.join(home, "Videos"), "is_dir": True, "icon": "🎬", "size_formatted": "Folder"},
+                    {"name": "💻 Desktop", "path": os.path.join(home, "Desktop"), "is_dir": True, "icon": "💻", "size_formatted": "Folder"},
+                ]
+                existing_shortcuts = [s for s in shortcuts if os.path.exists(s["path"])]
+                all_items = existing_shortcuts + mounted_drives
+
+                self.send_json({
+                    "status": "ok",
+                    "current_path": "shortcuts",
+                    "parent_path": None,
+                    "storage": storage_info,
+                    "items": all_items
+                })
+                return
+
+            req_path = os.path.realpath(os.path.expanduser(req_path))
+            if not os.path.exists(req_path) or not os.path.isdir(req_path):
+                self.send_json({"status": "error", "message": "Directory not found"}, status=404)
+                return
+
             try:
-                du = shutil.disk_usage(home)
+                du = shutil.disk_usage(req_path)
                 storage_info = {
                     "total_gb": round(du.total / (1024**3), 1),
                     "used_gb": round(du.used / (1024**3), 1),
@@ -1604,35 +1693,11 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-            if req_path in ('', 'shortcuts'):
-                shortcuts = [
-                    {"name": "🏠 Home", "path": home, "is_dir": True, "icon": "🏠", "size_formatted": "Folder"},
-                    {"name": "📥 Downloads", "path": os.path.join(home, "Downloads"), "is_dir": True, "icon": "📥", "size_formatted": "Folder"},
-                    {"name": "📄 Documents", "path": os.path.join(home, "Documents"), "is_dir": True, "icon": "📄", "size_formatted": "Folder"},
-                    {"name": "🖼️ Pictures", "path": os.path.join(home, "Pictures"), "is_dir": True, "icon": "🖼️", "size_formatted": "Folder"},
-                    {"name": "🎬 Videos", "path": os.path.join(home, "Videos"), "is_dir": True, "icon": "🎬", "size_formatted": "Folder"},
-                    {"name": "💻 Desktop", "path": os.path.join(home, "Desktop"), "is_dir": True, "icon": "💻", "size_formatted": "Folder"},
-                ]
-                existing_shortcuts = [s for s in shortcuts if os.path.exists(s["path"])]
-                self.send_json({
-                    "status": "ok",
-                    "current_path": "shortcuts",
-                    "parent_path": None,
-                    "storage": storage_info,
-                    "items": existing_shortcuts
-                })
-                return
-
-            req_path = os.path.realpath(os.path.expanduser(req_path))
-            if not req_path.startswith(home) and req_path != home:
-                self.send_json({"status": "error", "message": "Access restricted to home directory"}, status=403)
-                return
-
-            if not os.path.exists(req_path) or not os.path.isdir(req_path):
-                self.send_json({"status": "error", "message": "Directory not found"}, status=404)
-                return
-
-            parent_path = os.path.dirname(req_path) if req_path != home else "shortcuts"
+            mount_roots = {os.path.realpath(m['path']) for m in mounted_drives}
+            if req_path in ('/', home) or req_path in mount_roots:
+                parent_path = "shortcuts"
+            else:
+                parent_path = os.path.dirname(req_path)
 
             items = []
             try:
@@ -1670,27 +1735,64 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             })
             return
 
-        elif path == '/api/files/download_pc':
+        elif path in ('/api/files/download_pc', '/api/laptop/files/stream'):
             req_path = unquote(qs.get('path', [''])[0])
             req_path = os.path.realpath(os.path.expanduser(req_path))
-            home = os.path.expanduser('~')
-            if not req_path.startswith(home) or not os.path.exists(req_path) or os.path.isdir(req_path):
-                self.send_error(403, "Forbidden or file not found")
+            if not os.path.exists(req_path) or os.path.isdir(req_path):
+                self.send_error(404, "File not found")
                 return
             try:
                 fn = os.path.basename(req_path)
-                size = os.path.getsize(req_path)
+                total_size = os.path.getsize(req_path)
                 ctype, _ = mimetypes.guess_type(fn)
                 ctype = ctype or 'application/octet-stream'
-                self.send_response(200)
+
+                range_header = self.headers.get('Range')
+                start = 0
+                end = total_size - 1
+
+                if range_header and range_header.startswith('bytes='):
+                    ranges = range_header.replace('bytes=', '').split('-')
+                    if ranges[0]:
+                        start = int(ranges[0])
+                    if len(ranges) > 1 and ranges[1]:
+                        end = int(ranges[1])
+                    if end >= total_size:
+                        end = total_size - 1
+
+                    if start > end or start >= total_size:
+                        self.send_response(416, "Requested Range Not Satisfiable")
+                        self.send_header('Content-Range', f'bytes */{total_size}')
+                        self.end_headers()
+                        return
+
+                    length = end - start + 1
+                    self.send_response(206, "Partial Content")
+                    self.send_header('Content-Range', f'bytes {start}-{end}/{total_size}')
+                    self.send_header('Content-Length', str(length))
+                else:
+                    self.send_response(200, "OK")
+                    self.send_header('Content-Length', str(total_size))
+
+                self.send_header('Accept-Ranges', 'bytes')
                 self.send_header('Content-Type', ctype)
-                self.send_header('Content-Length', str(size))
-                self.send_header('Content-Disposition', f'attachment; filename="{quote(fn)}"')
+                self.send_header('Content-Disposition', f'inline; filename="{quote(fn)}"')
                 self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Cache-Control', 'public, max-age=3600')
                 self.end_headers()
+
                 with open(req_path, 'rb') as f:
-                    while chunk := f.read(65536):
+                    f.seek(start)
+                    remaining = end - start + 1
+                    while remaining > 0:
+                        chunk_size = min(remaining, 65536)
+                        chunk = f.read(chunk_size)
+                        if not chunk:
+                            break
                         self.wfile.write(chunk)
+                        remaining -= len(chunk)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
             except Exception as e:
                 try: self.send_error(500, str(e))
                 except Exception: pass

@@ -43,6 +43,16 @@
             </LinearLayout>
 
             <Button
+                android:id="@+id/btn_phone_screen_off"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:text="🌙"
+                android:textSize="18sp"
+                android:textColor="@color/text_white"
+                android:background="@drawable/card_bg"
+                android:layout_marginEnd="8dp" />
+
+            <Button
                 android:id="@+id/btn_settings"
                 android:layout_width="44dp"
                 android:layout_height="44dp"
@@ -407,16 +417,6 @@
                     android:layout_marginStart="4dp" />
             </LinearLayout>
 
-            <Button
-                android:id="@+id/btn_ring_pc"
-                android:layout_width="match_parent"
-                android:layout_height="40dp"
-                android:text="🔔 Ring Laptop"
-                android:textSize="12sp"
-                android:textColor="@color/text_white"
-                android:background="@drawable/card_bg"
-                android:layout_marginTop="8dp" />
-
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -424,13 +424,12 @@
                 android:layout_marginTop="8dp">
 
                 <Button
-                    android:id="@+id/btn_remote_trackpad"
+                    android:id="@+id/btn_ring_pc"
                     android:layout_width="0dp"
                     android:layout_height="42dp"
                     android:layout_weight="1"
-                    android:text="🖱️ Trackpad &amp; Laser"
+                    android:text="🔔 Ring Laptop"
                     android:textSize="12sp"
-                    android:textStyle="bold"
                     android:textColor="@color/text_white"
                     android:background="@drawable/card_bg"
                     android:layout_marginEnd="4dp" />
@@ -447,6 +446,17 @@
                     android:background="@drawable/card_bg"
                     android:layout_marginStart="4dp" />
             </LinearLayout>
+
+            <Button
+                android:id="@+id/btn_remote_trackpad"
+                android:layout_width="match_parent"
+                android:layout_height="46dp"
+                android:text="🖱️ Trackpad &amp; Laser"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_white"
+                android:background="@drawable/card_bg"
+                android:layout_marginTop="8dp" />
         </LinearLayout>
 
         <!-- Media Player Remote Card -->

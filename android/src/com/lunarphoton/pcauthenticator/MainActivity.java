@@ -104,6 +104,7 @@ public class MainActivity extends Activity {
     private Button btnScreenshotAction;
     private Button btnBrowseLaptopAction;
     private Button btnSearchFilesAction;
+    private Button btnPhoneScreenOff;
     private boolean isPcCurrentlyLocked = false;
     private Bitmap currentScreenshotBitmap = null;
     private String currentBrowsePath = "shortcuts";
@@ -165,9 +166,7 @@ public class MainActivity extends Activity {
         }
         getWindow().addFlags(
                 WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED |
-                WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD |
-                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON |
-                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
         );
 
         setContentView(R.layout.activity_main);
@@ -248,6 +247,10 @@ public class MainActivity extends Activity {
         btnSettings = findViewById(R.id.btn_settings);
         if (btnSettings != null) {
             btnSettings.setOnClickListener(v -> showSettingsDialog());
+        }
+        btnPhoneScreenOff = findViewById(R.id.btn_phone_screen_off);
+        if (btnPhoneScreenOff != null) {
+            btnPhoneScreenOff.setOnClickListener(v -> ScreenOffHelper.requestTurnScreenOff(MainActivity.this));
         }
         updateApproveButtonText();
 
@@ -2124,6 +2127,51 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void streamFileFromLaptop(String pcPath, String filename) {
+        try {
+            PairedDevice active = DeviceManager.getActiveDevice(this);
+            if (active == null) {
+                Toast.makeText(this, "No active PC connected", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            String streamUrl = active.getBaseUrl() + "/api/files/download_pc?path=" + URLEncoder.encode(pcPath, "UTF-8");
+            String mimeType = PCFileProvider.getMimeType(filename);
+            String lower = filename.toLowerCase();
+            if (mimeType == null || "application/octet-stream".equals(mimeType)) {
+                if (lower.endsWith(".mp4")) mimeType = "video/mp4";
+                else if (lower.endsWith(".mkv")) mimeType = "video/x-matroska";
+                else if (lower.endsWith(".webm")) mimeType = "video/webm";
+                else if (lower.endsWith(".avi")) mimeType = "video/x-msvideo";
+                else if (lower.endsWith(".mov")) mimeType = "video/quicktime";
+                else if (lower.endsWith(".mp3")) mimeType = "audio/mpeg";
+                else if (lower.endsWith(".flac")) mimeType = "audio/flac";
+                else if (lower.endsWith(".wav")) mimeType = "audio/wav";
+                else if (lower.endsWith(".m4a")) mimeType = "audio/mp4";
+                else if (lower.endsWith(".ogg")) mimeType = "audio/ogg";
+                else if (lower.endsWith(".pdf")) mimeType = "application/pdf";
+                else if (lower.endsWith(".png")) mimeType = "image/png";
+                else if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) mimeType = "image/jpeg";
+                else if (lower.endsWith(".webp")) mimeType = "image/webp";
+                else if (lower.endsWith(".gif")) mimeType = "image/gif";
+                else if (lower.endsWith(".txt") || lower.endsWith(".log") || lower.endsWith(".md") || lower.endsWith(".py") || lower.endsWith(".java") || lower.endsWith(".c") || lower.endsWith(".sh")) mimeType = "text/plain";
+                else mimeType = "*/*";
+            }
+
+            Intent viewIntent = new Intent(Intent.ACTION_VIEW);
+            viewIntent.setDataAndType(Uri.parse(streamUrl), mimeType);
+            viewIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            try {
+                startActivity(Intent.createChooser(viewIntent, "Stream / Open " + filename));
+            } catch (Exception ex) {
+                Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(streamUrl));
+                browserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(browserIntent);
+            }
+        } catch (Exception e) {
+            Toast.makeText(this, "Stream error: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+
     private void showFileBrowseDialog() {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_file_browse, null);
@@ -2135,6 +2183,7 @@ public class MainActivity extends Activity {
         TextView tvPath = dialogView.findViewById(R.id.tv_browse_path);
         Button btnRefresh = dialogView.findViewById(R.id.btn_browse_refresh);
 
+        Button btnShortcutDrives = dialogView.findViewById(R.id.btn_shortcut_drives);
         Button btnQuickDownloads = dialogView.findViewById(R.id.btn_shortcut_downloads);
         Button btnQuickDocs = dialogView.findViewById(R.id.btn_shortcut_documents);
         Button btnQuickPics = dialogView.findViewById(R.id.btn_shortcut_pictures);
@@ -2191,7 +2240,7 @@ public class MainActivity extends Activity {
                                     if (nextSlash > 0) dispPath = "~" + dispPath.substring(nextSlash);
                                     else dispPath = "~";
                                 }
-                                tvPath.setText("shortcuts".equals(dispPath) ? "Shortcuts" : dispPath);
+                                tvPath.setText("shortcuts".equals(dispPath) ? "Shortcuts / Drives" : dispPath);
                                 btnUp.setEnabled(parentBrowsePath != null);
                                 btnUp.setAlpha(parentBrowsePath != null ? 1.0f : 0.4f);
 
@@ -2215,6 +2264,7 @@ public class MainActivity extends Activity {
                                     TextView tvName = row.findViewById(R.id.tv_browse_item_name);
                                     TextView tvDetails = row.findViewById(R.id.tv_browse_item_details);
                                     Button btnAction = row.findViewById(R.id.btn_browse_item_action);
+                                    Button btnDownload = row.findViewById(R.id.btn_browse_item_download);
 
                                     tvName.setText(name);
                                     if (isDir) {
@@ -2223,23 +2273,28 @@ public class MainActivity extends Activity {
                                         btnAction.setText("Open");
                                         btnAction.setBackgroundResource(R.drawable.card_bg);
                                         btnAction.setOnClickListener(v -> load(itemPath));
+                                        if (btnDownload != null) btnDownload.setVisibility(View.GONE);
                                         row.setOnClickListener(v -> load(itemPath));
                                     } else {
                                         String lower = name.toLowerCase();
                                         if (lower.endsWith(".pdf")) tvIcon.setText("📕");
                                         else if (lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".webp") || lower.endsWith(".gif")) tvIcon.setText("🖼️");
-                                        else if (lower.endsWith(".mp4") || lower.endsWith(".mkv") || lower.endsWith(".mov") || lower.endsWith(".avi")) tvIcon.setText("🎥");
-                                        else if (lower.endsWith(".mp3") || lower.endsWith(".wav") || lower.endsWith(".flac") || lower.endsWith(".m4a")) tvIcon.setText("🎵");
+                                        else if (lower.endsWith(".mp4") || lower.endsWith(".mkv") || lower.endsWith(".mov") || lower.endsWith(".avi") || lower.endsWith(".webm")) tvIcon.setText("🎥");
+                                        else if (lower.endsWith(".mp3") || lower.endsWith(".wav") || lower.endsWith(".flac") || lower.endsWith(".m4a") || lower.endsWith(".ogg")) tvIcon.setText("🎵");
                                         else if (lower.endsWith(".zip") || lower.endsWith(".tar") || lower.endsWith(".gz") || lower.endsWith(".7z")) tvIcon.setText("📦");
                                         else if (lower.endsWith(".apk")) tvIcon.setText("📱");
                                         else if (lower.endsWith(".txt") || lower.endsWith(".md") || lower.endsWith(".py") || lower.endsWith(".java") || lower.endsWith(".c") || lower.endsWith(".sh")) tvIcon.setText("📝");
                                         else tvIcon.setText("📄");
 
                                         tvDetails.setText(sizeFormatted);
-                                        btnAction.setText("📥 Get");
+                                        btnAction.setText("▶️ Stream");
                                         btnAction.setBackgroundResource(R.drawable.btn_approve);
-                                        btnAction.setOnClickListener(v -> downloadFileFromLaptop(itemPath, name, null));
-                                        row.setOnClickListener(v -> downloadFileFromLaptop(itemPath, name, null));
+                                        btnAction.setOnClickListener(v -> streamFileFromLaptop(itemPath, name));
+                                        if (btnDownload != null) {
+                                            btnDownload.setVisibility(View.VISIBLE);
+                                            btnDownload.setOnClickListener(v -> downloadFileFromLaptop(itemPath, name, null));
+                                        }
+                                        row.setOnClickListener(v -> streamFileFromLaptop(itemPath, name));
                                     }
 
                                     containerItems.addView(row);
@@ -2265,6 +2320,7 @@ public class MainActivity extends Activity {
 
         BrowseLoader loader = new BrowseLoader();
         btnHome.setOnClickListener(v -> loader.load("shortcuts"));
+        if (btnShortcutDrives != null) btnShortcutDrives.setOnClickListener(v -> loader.load("shortcuts"));
         btnUp.setOnClickListener(v -> {
             if (parentBrowsePath != null) {
                 loader.load(parentBrowsePath);
