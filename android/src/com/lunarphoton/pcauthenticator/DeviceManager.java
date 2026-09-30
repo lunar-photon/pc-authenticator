@@ -8,6 +8,10 @@ import android.os.Looper;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.Inet4Address;
@@ -81,17 +85,55 @@ public class DeviceManager {
         prefs.edit().putString(PREF_DEVICES, arr.toString()).apply();
     }
 
+    public static boolean isWifiActive(Context context) {
+        if (context == null) return false;
+        try {
+            ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm != null) {
+                Network activeNet = cm.getActiveNetwork();
+                if (activeNet != null) {
+                    NetworkCapabilities caps = cm.getNetworkCapabilities(activeNet);
+                    if (caps != null) {
+                        return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                               caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET);
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
     public static PairedDevice getActiveDevice(Context context) {
         List<PairedDevice> list = getDevices(context);
+        PairedDevice target = null;
         for (PairedDevice d : list) {
-            if (d.isActive) return d;
+            if (d.isActive) {
+                target = d;
+                break;
+            }
         }
-        if (!list.isEmpty()) {
+        if (target == null && !list.isEmpty()) {
             list.get(0).isActive = true;
             saveDevices(context, list);
-            return list.get(0);
+            target = list.get(0);
         }
-        return new PairedDevice(DEFAULT_DEVICE_ID, DEFAULT_HOSTNAME, DEFAULT_IP, DEFAULT_PORT, "lunarphoton", null, null, true);
+        if (target == null) {
+            target = new PairedDevice(DEFAULT_DEVICE_ID, DEFAULT_HOSTNAME, DEFAULT_IP, DEFAULT_PORT, "lunarphoton", null, null, true);
+        }
+
+        // Automatic instant route adaptation based on physical network interface
+        boolean wifi = isWifiActive(context);
+        if (!wifi && target.internetUrl != null && !target.internetUrl.isEmpty()) {
+            setActiveUrl(target.internetUrl);
+            target.activeUrl = target.internetUrl;
+        } else if (activeUrlOverride != null && !activeUrlOverride.isEmpty()) {
+            target.activeUrl = activeUrlOverride;
+        } else if (wifi && target.localUrl != null && !target.localUrl.isEmpty()) {
+            setActiveUrl(target.localUrl);
+            target.activeUrl = target.localUrl;
+        }
+
+        return target;
     }
 
     public static void setActiveDevice(Context context, String ip) {

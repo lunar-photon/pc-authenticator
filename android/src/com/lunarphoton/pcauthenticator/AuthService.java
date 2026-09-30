@@ -75,6 +75,25 @@ public class AuthService extends Service {
     private PowerManager.WakeLock wakeLock;
     private FileServer fileServer;
 
+    private ConnectivityManager.NetworkCallback defaultNetworkCallback = null;
+    private Network lastKnownNetwork = null;
+    private volatile boolean isSwitchingNetwork = false;
+
+    private void abortCurrentConnectionAndWake() {
+        isSwitchingNetwork = true;
+        new Thread(() -> {
+            try {
+                HttpURLConnection c = currentConn;
+                if (c != null) {
+                    c.disconnect();
+                }
+            } catch (Exception ignored) {}
+            if (workerThread != null) {
+                workerThread.interrupt();
+            }
+        }).start();
+    }
+
     private BroadcastReceiver phoneStateReceiver = null;
     private Object telephonyCallbackObj = null;
     private String lastSentCallState = "idle";
@@ -144,20 +163,30 @@ public class AuthService extends Service {
         try {
             ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
             if (cm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                NetworkRequest req = new NetworkRequest.Builder()
-                    .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-                    .build();
-                cm.registerNetworkCallback(req, new ConnectivityManager.NetworkCallback() {
+                defaultNetworkCallback = new ConnectivityManager.NetworkCallback() {
                     @Override
                     public void onAvailable(Network network) {
-                        Log.i(TAG, "Wi-Fi became available! Testing local connection...");
-                        if (DeviceManager.isInternetActive() && currentConn != null) {
-                            new Thread(() -> {
-                                try { currentConn.disconnect(); } catch (Exception ignored) {}
-                            }).start();
+                        boolean networkChanged = (lastKnownNetwork != null && !network.equals(lastKnownNetwork));
+                        lastKnownNetwork = network;
+                        if (networkChanged || currentConn != null) {
+                            boolean wifi = DeviceManager.isWifiActive(AuthService.this);
+                            Log.i(TAG, "Network route changed/available (Wi-Fi=" + wifi + "). Rapidly adapting active connection...");
+                            DeviceManager.setActiveUrl(null);
+                            abortCurrentConnectionAndWake();
                         }
                     }
-                });
+
+                    @Override
+                    public void onLost(Network network) {
+                        Log.i(TAG, "Active network interface lost. Adapting connection immediately...");
+                        if (network.equals(lastKnownNetwork)) {
+                            lastKnownNetwork = null;
+                        }
+                        DeviceManager.setActiveUrl(null);
+                        abortCurrentConnectionAndWake();
+                    }
+                };
+                cm.registerDefaultNetworkCallback(defaultNetworkCallback);
             }
         } catch (Exception e) {
             Log.w(TAG, "Network monitoring registration error: " + e.getMessage());
@@ -204,9 +233,7 @@ public class AuthService extends Service {
                                 if (needsUpdate) {
                                     Log.i(TAG, "Beacon: laptop updated network location: " + newIp + " (internet: " + internetUrl + ")");
                                     DeviceManager.addOrUpdateDevice(this, active);
-                                    if (currentConn != null) {
-                                        try { currentConn.disconnect(); } catch (Exception ignored) {}
-                                    }
+                                    abortCurrentConnectionAndWake();
                                 }
                             }
                         }
@@ -225,11 +252,7 @@ public class AuthService extends Service {
         startForeground(NOTIFICATION_ID_FOREGROUND, buildForegroundNotification("Connecting to laptop..."));
 
         if (intent != null && ACTION_RECONNECT.equals(intent.getAction())) {
-            if (currentConn != null) {
-                new Thread(() -> {
-                    try { currentConn.disconnect(); } catch (Exception ignored) {}
-                }).start();
-            }
+            abortCurrentConnectionAndWake();
         }
 
         if (phoneStateReceiver == null) {
@@ -273,16 +296,40 @@ public class AuthService extends Service {
     private void listenLoop() {
         int consecutiveFails = 0;
         while (isRunning) {
+            if (Thread.interrupted() || isSwitchingNetwork) {
+                isSwitchingNetwork = false;
+                consecutiveFails = 0;
+            }
+
             PairedDevice active = DeviceManager.getActiveDevice(this);
             String localUrl = active.getLocalUrl();
             String internetUrl = active.getInternetUrl();
+            boolean wifiActive = DeviceManager.isWifiActive(this);
 
-            String targetUrl = localUrl;
-            boolean isInternet = false;
+            String targetUrl;
+            boolean isInternet;
+
+            // Pick the active reachable route immediately without waiting for timeouts
+            if (!wifiActive && internetUrl != null && !internetUrl.isEmpty()) {
+                targetUrl = internetUrl;
+                isInternet = true;
+            } else if (localUrl != null && !localUrl.isEmpty()) {
+                targetUrl = localUrl;
+                isInternet = false;
+            } else if (internetUrl != null && !internetUrl.isEmpty()) {
+                targetUrl = internetUrl;
+                isInternet = true;
+            } else {
+                targetUrl = active.getBaseUrl();
+                isInternet = targetUrl.startsWith("https://");
+            }
 
             HttpURLConnection conn = null;
             try {
-                conn = openStreamConnection(active, targetUrl, 2500);
+                int timeoutMs = isInternet ? 6000 : 2000;
+                conn = openStreamConnection(active, targetUrl, timeoutMs);
+                currentConn = conn;
+
                 int code = -1;
                 try {
                     code = conn.getResponseCode();
@@ -291,11 +338,22 @@ public class AuthService extends Service {
                         try { conn.disconnect(); } catch (Exception ignored) {}
                         conn = null;
                     }
-                    if (internetUrl != null && !internetUrl.isEmpty() && !internetUrl.equals(targetUrl)) {
-                        Log.i(TAG, "Local Wi-Fi unreachable (" + connectEx.getMessage() + "), failing over to Internet Tunnel: " + internetUrl);
+                    currentConn = null;
+
+                    // Immediate symmetric failover if chosen route fails
+                    if (!isInternet && internetUrl != null && !internetUrl.isEmpty() && !internetUrl.equals(targetUrl)) {
+                        Log.i(TAG, "Local connection unreachable (" + connectEx.getMessage() + "), failing over to Internet Tunnel immediately: " + internetUrl);
                         targetUrl = internetUrl;
                         isInternet = true;
-                        conn = openStreamConnection(active, targetUrl, 8000);
+                        conn = openStreamConnection(active, targetUrl, 6000);
+                        currentConn = conn;
+                        code = conn.getResponseCode();
+                    } else if (isInternet && localUrl != null && !localUrl.isEmpty() && !localUrl.equals(targetUrl)) {
+                        Log.i(TAG, "Internet Tunnel unreachable (" + connectEx.getMessage() + "), attempting local connection: " + localUrl);
+                        targetUrl = localUrl;
+                        isInternet = false;
+                        conn = openStreamConnection(active, targetUrl, 2000);
+                        currentConn = conn;
                         code = conn.getResponseCode();
                     } else {
                         throw connectEx;
@@ -357,13 +415,17 @@ public class AuthService extends Service {
                     updateForegroundNotification("Server HTTP " + code);
                 }
             } catch (Exception e) {
-                consecutiveFails++;
-                Log.w(TAG, "Connection loop error: " + e.getMessage() + " (fail #" + consecutiveFails + ")");
-                broadcastStatus(false, "Disconnected (Reconnecting...)");
-                updateForegroundNotification("Searching for laptop...");
+                if (isSwitchingNetwork) {
+                    Log.i(TAG, "Stream connection closed for rapid network interface handoff.");
+                } else {
+                    consecutiveFails++;
+                    Log.w(TAG, "Connection loop error: " + e.getMessage() + " (fail #" + consecutiveFails + ")");
+                    broadcastStatus(false, "Disconnected (Reconnecting...)");
+                    updateForegroundNotification("Searching for laptop...");
+                }
 
-                // Exponentially probe network/hotspot to find new laptop IP without draining battery
-                if (consecutiveFails == 2 || consecutiveFails == 6 || (consecutiveFails > 6 && consecutiveFails % 20 == 0)) {
+                // If on local Wi-Fi and failed twice, discover devices
+                if (!isSwitchingNetwork && wifiActive && (consecutiveFails == 2 || consecutiveFails == 6 || (consecutiveFails > 6 && consecutiveFails % 20 == 0))) {
                     DeviceManager.discoverDevices(this, new DeviceManager.DiscoveryCallback() {
                         @Override
                         public void onDiscovered(PairedDevice device) {
@@ -371,9 +433,7 @@ public class AuthService extends Service {
                             if (activeDev != null && ((device.deviceId != null && device.deviceId.equals(activeDev.deviceId)) || device.hostname.equalsIgnoreCase(activeDev.hostname)) && !device.ip.equals(activeDev.ip)) {
                                 Log.i(TAG, "Auto-discovered laptop at new IP: " + device.ip);
                                 DeviceManager.addOrUpdateDevice(AuthService.this, device);
-                                if (currentConn != null) {
-                                    try { currentConn.disconnect(); } catch (Exception ignored) {}
-                                }
+                                abortCurrentConnectionAndWake();
                             }
                         }
 
@@ -382,16 +442,27 @@ public class AuthService extends Service {
                     });
                 }
             } finally {
-                if (conn != null) conn.disconnect();
+                if (conn != null) {
+                    try { conn.disconnect(); } catch (Exception ignored) {}
+                }
                 currentConn = null;
             }
 
             if (isRunning) {
-                try {
-                    // Exponential backoff: 2s -> 4s -> 8s -> 16s -> 30s max
-                    long backoff = (consecutiveFails <= 0) ? 2000L : Math.min(30000L, 2000L * (1L << Math.min(consecutiveFails - 1, 4)));
-                    Thread.sleep(backoff);
-                } catch (InterruptedException ignored) {}
+                if (isSwitchingNetwork) {
+                    // Zero sleep delay on network handoff! Reconnect immediately!
+                    isSwitchingNetwork = false;
+                    consecutiveFails = 0;
+                } else {
+                    try {
+                        // Exponential backoff: 1s -> 2s -> 4s -> 8s max
+                        long backoff = (consecutiveFails <= 0) ? 1000L : Math.min(8000L, 1000L * (1L << Math.min(consecutiveFails - 1, 3)));
+                        Thread.sleep(backoff);
+                    } catch (InterruptedException e) {
+                        isSwitchingNetwork = false;
+                        consecutiveFails = 0;
+                    }
+                }
             }
         }
     }
@@ -1197,6 +1268,16 @@ public class AuthService extends Service {
             }
             telephonyCallbackObj = null;
         }
+        if (defaultNetworkCallback != null) {
+            try {
+                ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+                if (cm != null) {
+                    cm.unregisterNetworkCallback(defaultNetworkCallback);
+                }
+            } catch (Exception ignored) {}
+            defaultNetworkCallback = null;
+        }
+        abortCurrentConnectionAndWake();
         if (workerThread != null) workerThread.interrupt();
         if (wakeLock != null && wakeLock.isHeld()) {
             wakeLock.release();
