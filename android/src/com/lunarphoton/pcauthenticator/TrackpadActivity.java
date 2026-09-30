@@ -614,6 +614,9 @@ public class TrackpadActivity extends Activity implements SensorEventListener {
             while (isRunning) {
                 try {
                     JSONObject packet = sendQueue.take();
+                    if (activeDevice != null && activeDevice.authToken != null) {
+                        packet.put("token", activeDevice.authToken);
+                    }
                     byte[] bytes = packet.toString().getBytes("UTF-8");
 
                     boolean sentViaUdp = false;

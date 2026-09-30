@@ -46,7 +46,25 @@ def choose_device_gui(devices):
     except Exception:
         return devices[0]
 
-def send_file(filepath, phone_ip, phone_port=1761):
+def get_device_token(client_id=None, ip=None):
+    try:
+        cfg_file = os.path.expanduser('~/.config/pc-authenticator/config.json')
+        if os.path.exists(cfg_file):
+            with open(cfg_file, 'r') as f:
+                cfg = json.load(f)
+            paired = cfg.get('paired_clients', {})
+            for token, client in paired.items():
+                if client_id and client.get('client_id') == client_id:
+                    return token
+                if ip and client.get('ip') == ip:
+                    return token
+            if paired:
+                return next(iter(paired.keys()))
+    except Exception:
+        pass
+    return None
+
+def send_file(filepath, phone_ip, phone_port=1761, auth_token=None):
     fn = os.path.basename(filepath)
     size = os.path.getsize(filepath)
 
@@ -56,14 +74,17 @@ def send_file(filepath, phone_ip, phone_port=1761):
             url = f"http://{phone_ip}:{phone_port}/api/files/upload?path={quote('/storage/emulated/0/Download')}"
             with open(filepath, 'rb') as f:
                 data = f.read()
+            headers = {
+                'Content-Type': 'application/octet-stream',
+                'Content-Length': str(size),
+                'X-Filename': quote(fn)
+            }
+            if auth_token:
+                headers['Authorization'] = f'Bearer {auth_token}'
             req = urllib.request.Request(
                 url,
                 data=data,
-                headers={
-                    'Content-Type': 'application/octet-stream',
-                    'Content-Length': str(size),
-                    'X-Filename': quote(fn)
-                },
+                headers=headers,
                 method='POST'
             )
             with urllib.request.urlopen(req, timeout=30) as resp:
@@ -168,6 +189,8 @@ def main():
     phone_ip = target_device.get('ip') if target_device else phone.get('ip')
     phone_port = phone.get('port', 1761)
     phone_name = target_device.get('client_name') if target_device else phone.get('client_name', 'Android Phone')
+    target_cid = target_device.get('client_id') if target_device else None
+    auth_token = get_device_token(target_cid, phone_ip)
 
     total = len(files)
     success_count = 0
@@ -175,7 +198,7 @@ def main():
     for idx, f in enumerate(files, 1):
         fn = os.path.basename(f)
         notify("PC Connect", f"Transferring {fn} to {phone_name} ({idx}/{total})...", icon="network-transmit")
-        sent = send_file(f, phone_ip, phone_port)
+        sent = send_file(f, phone_ip, phone_port, auth_token)
         if sent:
             success_count += 1
 

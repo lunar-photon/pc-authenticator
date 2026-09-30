@@ -71,18 +71,14 @@ def save_config(cfg):
     try:
         with open(CONFIG_FILE, 'w') as f:
             json.dump(cfg, f, indent=2)
+        try:
+            os.chmod(CONFIG_FILE, 0o600)
+        except Exception:
+            pass
     except Exception as e:
         sys.stderr.write(f"Error saving config: {e}\n")
 
 def get_laptop_id():
-    try:
-        if os.path.exists('/etc/machine-id'):
-            with open('/etc/machine-id', 'r') as f:
-                mid = f.read().strip()
-                if mid:
-                    return mid
-    except Exception:
-        pass
     cfg = load_config()
     if 'device_id' not in cfg:
         cfg['device_id'] = str(uuid.uuid4())
@@ -833,28 +829,34 @@ def handle_telephony_call_state(state):
 def get_phone_target():
     ip = active_phone_state.get('ip')
     port = active_phone_state.get('port', 1761)
-    if not ip or ip in ('127.0.0.1', 'localhost', '::1'):
-        cfg = load_config()
-        for token, client in cfg.get('paired_clients', {}).items():
+    token = active_phone_state.get('auth_token')
+    cfg = load_config()
+    if not ip or ip in ('127.0.0.1', 'localhost', '::1') or not token:
+        for t, client in cfg.get('paired_clients', {}).items():
             client_ip = client.get('ip')
             if client_ip and client_ip not in ('127.0.0.1', 'localhost', '::1'):
                 ip = client_ip
+                token = t
                 active_phone_state['ip'] = ip
+                active_phone_state['auth_token'] = token
                 active_phone_state['client_name'] = client.get('client_name', 'Android Phone')
                 break
-    return ip, port
+    return ip, port, token
 
 def ring_phone(phone_ip=None, port=1761):
     # 1. Broadcast via NDJSON stream
     auth_mgr.broadcast_ndjson(json.dumps({"event": "ring", "title": "Find My Phone", "time": int(time.time())}) + "\n")
     # 2. Direct HTTP to phone if IP is known
-    target_ip, target_port = get_phone_target()
+    target_ip, target_port, target_token = get_phone_target()
     target_ip = phone_ip or target_ip
     target_port = port or target_port
     if target_ip:
         def _direct_ring():
             try:
-                req = urllib.request.Request(f"http://{target_ip}:{target_port}/api/ring", data=b'{}', headers={'Content-Type': 'application/json'}, method='POST')
+                headers = {'Content-Type': 'application/json'}
+                if target_token:
+                    headers['Authorization'] = f'Bearer {target_token}'
+                req = urllib.request.Request(f"http://{target_ip}:{target_port}/api/ring", data=b'{}', headers=headers, method='POST')
                 urllib.request.urlopen(req, timeout=3)
             except Exception:
                 pass
@@ -864,13 +866,16 @@ def unring_phone(phone_ip=None, port=1761):
     # 1. Broadcast unring via NDJSON stream
     auth_mgr.broadcast_ndjson(json.dumps({"event": "unring", "title": "Stop Alarm", "time": int(time.time())}) + "\n")
     # 2. Direct HTTP to phone to silence
-    target_ip, target_port = get_phone_target()
+    target_ip, target_port, target_token = get_phone_target()
     target_ip = phone_ip or target_ip
     target_port = port or target_port
     if target_ip:
         def _direct_unring():
             try:
-                req = urllib.request.Request(f"http://{target_ip}:{target_port}/api/unring", data=b'{}', headers={'Content-Type': 'application/json'}, method='POST')
+                headers = {'Content-Type': 'application/json'}
+                if target_token:
+                    headers['Authorization'] = f'Bearer {target_token}'
+                req = urllib.request.Request(f"http://{target_ip}:{target_port}/api/unring", data=b'{}', headers=headers, method='POST')
                 urllib.request.urlopen(req, timeout=3)
             except Exception:
                 pass
@@ -1167,6 +1172,22 @@ def trigger_laser_overlay(data):
         pass
 
 def start_udp_mouse_listener(port=1762):
+    last_cfg_check = [0]
+    cached_tokens = [set()]
+
+    def is_valid_token(tok):
+        if not tok or not isinstance(tok, str):
+            return False
+        now = time.time()
+        if now - last_cfg_check[0] > 3:
+            try:
+                cfg = load_config()
+                cached_tokens[0] = set(cfg.get('paired_clients', {}).keys())
+                last_cfg_check[0] = now
+            except Exception:
+                pass
+        return tok in cached_tokens[0]
+
     def mouse_loop():
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -1178,6 +1199,9 @@ def start_udp_mouse_listener(port=1762):
                 data, addr = sock.recvfrom(2048)
                 try:
                     payload = json.loads(data.decode('utf-8'))
+                    tok = payload.get('token')
+                    if not is_valid_token(tok):
+                        continue
                     mtype = payload.get('type', '')
                     if mtype == 'move':
                         virtual_mouse.move(payload.get('dx', 0), payload.get('dy', 0))
@@ -1616,9 +1640,21 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             })
             return
         elif path == '/api/events':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
             self.handle_sse()
             return
         elif path == '/api/wait_auth':
+            is_local = (self.client_address[0] in ('127.0.0.1', '::1', 'localhost')) and not is_tunnel_request(self)
+            if not is_local:
+                cfg = load_config()
+                client_info, token = authenticate_client(self, cfg)
+                if not client_info:
+                    self.send_json({"error": "unauthorized"}, status=401)
+                    return
             session_id = qs.get('session_id', [None])[0]
             if not session_id:
                 self.send_json({"error": "missing session_id"}, status=400)
@@ -1657,15 +1693,14 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
                         active_phone_state['client_name'] = client.get('client_name', 'Android Phone')
                         break
 
-            # Deduplicate paired devices by unique client_id
+            # Deduplicate paired devices by unique client_id - NEVER expose auth token!
             devices_by_id = {}
-            for token, client in cfg.get('paired_clients', {}).items():
-                cid = client.get('client_id') or token
+            for tok, client in cfg.get('paired_clients', {}).items():
+                cid = client.get('client_id') or ("id_" + hashlib.sha256(tok.encode()).hexdigest()[:12])
                 if cid == "phone-auto-test" and len(cfg.get('paired_clients', {})) > 1:
                     continue
-                is_active = (active_phone_state.get('auth_token') == token) or (active_phone_state.get('ip') == client.get('ip'))
+                is_active = (active_phone_state.get('auth_token') == tok) or (active_phone_state.get('ip') == client.get('ip'))
                 devices_by_id[cid] = {
-                    "token": token,
                     "client_id": cid,
                     "client_name": client.get('client_name', 'Android Phone'),
                     "ip": client.get('ip'),
@@ -1675,7 +1710,12 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
 
             self.send_json({
                 "connected": is_connected,
-                "phone": active_phone_state,
+                "phone": {
+                    "client_name": active_phone_state.get("client_name", "Android Phone"),
+                    "ip": active_phone_state.get("ip"),
+                    "battery_level": active_phone_state.get("battery_level"),
+                    "last_seen": active_phone_state.get("last_seen", 0)
+                },
                 "clients_count": len(device_list),
                 "devices": device_list
             })
@@ -1683,15 +1723,18 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
 
         elif path == '/api/devices':
             cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
             is_connected = (time.time() - active_phone_state["last_seen"] < 90) or bool(auth_mgr.ndjson_clients)
             devices_by_id = {}
-            for token, client in cfg.get('paired_clients', {}).items():
-                cid = client.get('client_id') or token
+            for tok, client in cfg.get('paired_clients', {}).items():
+                cid = client.get('client_id') or ("id_" + hashlib.sha256(tok.encode()).hexdigest()[:12])
                 if cid == "phone-auto-test" and len(cfg.get('paired_clients', {})) > 1:
                     continue
-                is_active = (active_phone_state.get('auth_token') == token) or (active_phone_state.get('ip') == client.get('ip'))
+                is_active = (active_phone_state.get('auth_token') == tok) or (active_phone_state.get('ip') == client.get('ip'))
                 devices_by_id[cid] = {
-                    "token": token,
                     "client_id": cid,
                     "client_name": client.get('client_name', 'Android Phone'),
                     "ip": client.get('ip'),
@@ -1701,14 +1744,31 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             return
 
         elif path == '/api/clipboard':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
             self.send_json({"status": "ok", "text": get_kde_clipboard()})
             return
 
         elif path == '/api/media/status':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
             self.send_json(get_mpris_status())
             return
 
         elif path == '/api/pc/status':
+            is_local = (self.client_address[0] in ('127.0.0.1', '::1', 'localhost')) and not is_tunnel_request(self)
+            if not is_local:
+                cfg = load_config()
+                client_info, token = authenticate_client(self, cfg)
+                if not client_info:
+                    self.send_json({"error": "unauthorized"}, status=401)
+                    return
             self.send_json(get_pc_system_status())
             return
 
@@ -1733,6 +1793,13 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             return
 
         elif path == '/api/weather':
+            is_local = (self.client_address[0] in ('127.0.0.1', '::1', 'localhost')) and not is_tunnel_request(self)
+            if not is_local:
+                cfg = load_config()
+                client_info, token = authenticate_client(self, cfg)
+                if not client_info:
+                    self.send_json({"error": "unauthorized"}, status=401)
+                    return
             w = get_weather_cached()
             self.send_json({"status": "ok", "weather": w} if w else {"status": "error", "message": "Weather unavailable"})
             return
@@ -1967,6 +2034,11 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             if not staged or not os.path.exists(staged['filepath']):
                 self.send_error(404, "Staged file not found or expired")
                 return
+            cfg = load_config()
+            client_info, client_token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_error(401, "Unauthorized: Pairing required to download staged file")
+                return
             try:
                 size = os.path.getsize(staged['filepath'])
                 fn = quote(staged['filename'])
@@ -1986,14 +2058,22 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
 
         # 7. Phone File Browser Proxies (Linux Desktop -> Phone)
         elif path == '/api/phone/files/list':
-            phone_ip, phone_port = get_phone_target()
+            cfg = load_config()
+            client_info, client_token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
+            phone_ip, phone_port, phone_token = get_phone_target()
             if not phone_ip:
                 self.send_json({"error": "phone_not_connected", "message": "Phone is not connected or IP unknown"}, status=503)
                 return
             req_path = qs.get('path', ['/storage/emulated/0'])[0]
             try:
                 target_url = f"http://{phone_ip}:{phone_port}/api/files/list?path={quote(req_path)}"
-                req = urllib.request.Request(target_url)
+                headers = {}
+                if phone_token:
+                    headers['Authorization'] = f'Bearer {phone_token}'
+                req = urllib.request.Request(target_url, headers=headers)
                 with urllib.request.urlopen(req, timeout=8) as resp:
                     data = resp.read()
                     self.send_response(resp.status)
@@ -2006,7 +2086,12 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             return
 
         elif path in ('/api/phone/files/download', '/api/phone/files/preview'):
-            phone_ip, phone_port = get_phone_target()
+            cfg = load_config()
+            client_info, client_token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_error(401, "Unauthorized")
+                return
+            phone_ip, phone_port, phone_token = get_phone_target()
             if not phone_ip:
                 self.send_error(503, "Phone is not connected")
                 return
@@ -2014,7 +2099,10 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             is_preview = (path == '/api/phone/files/preview') or (qs.get('preview', ['0'])[0] in ('1', 'true'))
             try:
                 target_url = f"http://{phone_ip}:{phone_port}/api/files/download?path={quote(req_path)}"
-                req = urllib.request.Request(target_url)
+                headers = {}
+                if phone_token:
+                    headers['Authorization'] = f'Bearer {phone_token}'
+                req = urllib.request.Request(target_url, headers=headers)
                 with urllib.request.urlopen(req, timeout=30) as resp:
                     self.send_response(200)
                     fn = os.path.basename(req_path)
@@ -2102,6 +2190,11 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
 
         # 1. File Upload (Phone -> PC)
         if path == '/api/files/upload':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
             raw_fn = self.headers.get('X-Filename', '')
             if raw_fn:
                 filename = os.path.basename(unquote(raw_fn))
@@ -2139,7 +2232,12 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
 
         # 2. File Proxy Upload (PC -> Phone)
         elif path == '/api/phone/files/upload':
-            phone_ip, phone_port = get_phone_target()
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
+            phone_ip, phone_port, phone_token = get_phone_target()
             if not phone_ip:
                 self.send_json({"error": "phone_not_connected"}, status=503)
                 return
@@ -2149,13 +2247,16 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             try:
                 length = int(self.headers.get('Content-Length', 0))
                 data = self.rfile.read(length)
+                headers = {
+                    'Content-Type': 'application/octet-stream',
+                    'X-Filename': raw_fn
+                }
+                if phone_token:
+                    headers['Authorization'] = f'Bearer {phone_token}'
                 req = urllib.request.Request(
                     target_url,
                     data=data,
-                    headers={
-                        'Content-Type': 'application/octet-stream',
-                        'X-Filename': raw_fn
-                    },
+                    headers=headers,
                     method='POST'
                 )
                 with urllib.request.urlopen(req, timeout=30) as resp:
@@ -2172,8 +2273,12 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
         # Read JSON body for standard API calls
         body = self.read_json()
 
-        # 3. Core PC Authenticator APIs
+        # 3. Core PC Authenticator APIs (Local only)
         if path == '/api/request_auth':
+            is_local = (self.client_address[0] in ('127.0.0.1', '::1', 'localhost')) and not is_tunnel_request(self)
+            if not is_local:
+                self.send_json({"error": "forbidden", "message": "Auth requests can only be initiated locally."}, status=403)
+                return
             user = body.get('user', os.environ.get('USER', 'lunarphoton'))
             cfg = load_config()
             timeout = cfg.get('auth_timeout_seconds', 35)
@@ -2181,11 +2286,25 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             self.send_json(session)
 
         elif path == '/api/pair/request':
+            if is_tunnel_request(self):
+                self.send_json({"error": "forbidden", "message": "Pairing is only allowed over local Wi-Fi / LAN."}, status=403)
+                return
+
+            now = time.time()
+            with auth_mgr.lock:
+                if not hasattr(auth_mgr, 'pair_rate_limits'):
+                    auth_mgr.pair_rate_limits = []
+                auth_mgr.pair_rate_limits = [t for t in auth_mgr.pair_rate_limits if now - t < 60]
+                if len(auth_mgr.pair_rate_limits) >= 5:
+                    self.send_json({"error": "rate_limited", "message": "Too many pairing attempts. Please wait 1 minute."}, status=429)
+                    return
+                auth_mgr.pair_rate_limits.append(now)
+
             client_id = body.get('client_id', '')
             client_name = body.get('client_name', 'Android Phone')
             if not client_id:
                 client_id = str(uuid.uuid4())
-            pin = f"{random.randint(100000, 999999)}"
+            pin = f"{secrets.randbelow(900000) + 100000}"
             with auth_mgr.lock:
                 auth_mgr.pending_pairings[client_id] = {
                     "pin": pin,
@@ -2213,6 +2332,9 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             })
 
         elif path == '/api/pair/confirm':
+            if is_tunnel_request(self):
+                self.send_json({"error": "forbidden", "message": "Pairing confirmation is only allowed over local Wi-Fi / LAN."}, status=403)
+                return
             client_id = body.get('client_id', '')
             pin = str(body.get('pin', '')).replace(' ', '').strip()
             client_name = body.get('client_name', 'Android Phone')
@@ -2390,9 +2512,14 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
 
         # 5. Clipboard Sync
         elif path == '/api/clipboard':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
             global _last_phone_clipboard, _last_pc_clipboard
             text = body.get('text', '')
-            is_local = (self.client_address[0] in ('127.0.0.1', '::1', 'localhost')) and not is_tunnel_request(self)
+            is_local = client_info.get('local', False)
             if not text and is_local:
                 text = get_kde_clipboard()
                 if text:
@@ -2509,12 +2636,21 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
 
         # 9b. Telephony / Call Event (Auto-pause media on call)
         elif path == '/api/telephony/call':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
             state = body.get('state', '').lower()
             handle_telephony_call_state(state)
             self.send_json({"status": "ok", "state": state})
 
-        # 10. File Staging for PC-to-Phone send
+        # 10. File Staging for PC-to-Phone send (Local PC Only)
         elif path == '/api/files/stage':
+            is_local = (self.client_address[0] in ('127.0.0.1', '::1', 'localhost')) and not is_tunnel_request(self)
+            if not is_local:
+                self.send_json({"error": "forbidden", "message": "File staging is only allowed from local PC."}, status=403)
+                return
             filepath = body.get('filepath', '')
             if not filepath or not os.path.exists(filepath):
                 self.send_json({"error": "file_not_found"}, status=404)
@@ -2552,21 +2688,34 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
 
         # 11. Phone Filesystem Mutations (Proxy)
         elif path == '/api/phone/files/delete':
-            phone_ip, phone_port = get_phone_target()
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
+            phone_ip, phone_port, phone_token = get_phone_target()
             if not phone_ip:
                 self.send_json({"error": "phone_not_connected"}, status=503)
                 return
             target_path = body.get('path', '')
             try:
                 target_url = f"http://{phone_ip}:{phone_port}/api/files/delete?path={quote(target_path)}"
-                req = urllib.request.Request(target_url, data=b'{}', headers={'Content-Type': 'application/json'}, method='POST')
+                headers = {'Content-Type': 'application/json'}
+                if phone_token:
+                    headers['Authorization'] = f'Bearer {phone_token}'
+                req = urllib.request.Request(target_url, data=b'{}', headers=headers, method='POST')
                 with urllib.request.urlopen(req, timeout=5) as resp:
                     self.send_json({"status": "ok"})
             except Exception as e:
                 self.send_json({"error": "delete_failed", "message": str(e)}, status=502)
 
         elif path == '/api/phone/files/mkdir':
-            phone_ip, phone_port = get_phone_target()
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
+            phone_ip, phone_port, phone_token = get_phone_target()
             if not phone_ip:
                 self.send_json({"error": "phone_not_connected"}, status=503)
                 return
@@ -2574,7 +2723,10 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             name = body.get('name', '')
             try:
                 target_url = f"http://{phone_ip}:{phone_port}/api/files/mkdir?path={quote(parent_path)}&name={quote(name)}"
-                req = urllib.request.Request(target_url, data=b'{}', headers={'Content-Type': 'application/json'}, method='POST')
+                headers = {'Content-Type': 'application/json'}
+                if phone_token:
+                    headers['Authorization'] = f'Bearer {phone_token}'
+                req = urllib.request.Request(target_url, data=b'{}', headers=headers, method='POST')
                 with urllib.request.urlopen(req, timeout=5) as resp:
                     self.send_json({"status": "ok"})
             except Exception as e:
@@ -2658,7 +2810,11 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             if not client_info:
                 self.send_json({"error": "unauthorized"}, status=401)
                 return
-            ident = body.get('token') or body.get('client_id') or body.get('id') or body.get('ip') or (token if not client_info.get('local') else None)
+            is_local = client_info.get('local', False)
+            if is_local:
+                ident = body.get('token') or body.get('client_id') or body.get('id') or body.get('ip')
+            else:
+                ident = token
             if not ident:
                 self.send_json({"error": "missing_device_id"}, status=400)
                 return

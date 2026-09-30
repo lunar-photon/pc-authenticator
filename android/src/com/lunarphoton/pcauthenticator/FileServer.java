@@ -178,9 +178,19 @@ public class FileServer {
             // Route endpoints
             if (method.equals("OPTIONS")) {
                 sendOptions(rawOut);
+                return;
             } else if (method.equals("GET") && path.equals("/api/ping")) {
                 sendJson(rawOut, new JSONObject().put("status", "ok").put("service", "pc-connect-phone"));
-            } else if (method.equals("POST") && path.equals("/api/ring")) {
+                return;
+            }
+
+            // Require paired bearer authentication for all sensitive operations
+            if (!isAuthorized(headers)) {
+                sendError(rawOut, 401, "Unauthorized");
+                return;
+            }
+
+            if (method.equals("POST") && path.equals("/api/ring")) {
                 RingManager.startAlarm(context);
                 sendJson(rawOut, new JSONObject().put("status", "ok"));
             } else if (method.equals("POST") && path.equals("/api/unring")) {
@@ -690,6 +700,31 @@ public class FileServer {
         out.write(header.getBytes("UTF-8"));
         out.write(bytes);
         out.flush();
+    }
+
+    private boolean isAuthorized(Map<String, String> headers) {
+        String authHeader = headers.get("authorization");
+        if (authHeader == null || !authHeader.toLowerCase().startsWith("bearer ")) {
+            return false;
+        }
+        String token = authHeader.substring(7).trim();
+        if (token.isEmpty()) {
+            return false;
+        }
+
+        try {
+            List<PairedDevice> devices = DeviceManager.getDevices(context);
+            byte[] tokenBytes = token.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            for (PairedDevice d : devices) {
+                if (d.authToken != null && !d.authToken.isEmpty()) {
+                    byte[] devBytes = d.authToken.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                    if (java.security.MessageDigest.isEqual(tokenBytes, devBytes)) {
+                        return true;
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return false;
     }
 
     private void sendError(OutputStream out, int code, String msg) throws Exception {
