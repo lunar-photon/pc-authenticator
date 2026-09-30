@@ -268,7 +268,9 @@ public class AuthService extends Service {
         startForeground(NOTIFICATION_ID_FOREGROUND, buildForegroundNotification("Connecting to laptop..."));
 
         if (intent != null && ACTION_RECONNECT.equals(intent.getAction())) {
-            abortCurrentConnectionAndWake();
+            if (currentConn == null && workerThread != null) {
+                workerThread.interrupt();
+            }
         }
 
         if (phoneStateReceiver == null) {
@@ -500,10 +502,21 @@ public class AuthService extends Service {
         sendBroadcast(updateIntent);
     }
 
+    private String lastChallengeSessionId = null;
+    private long lastChallengeTimestamp = 0;
+
     private void handleChallengeEvent(JSONObject json) {
         String title = json.optString("title", "🔒 PC Unlock Request");
         String message = json.optString("message", "Screen unlock requested on your laptop. Tap Approve to unlock.");
         String sessionId = json.optString("id", "");
+
+        long now = System.currentTimeMillis();
+        if (sessionId != null && !sessionId.isEmpty() && sessionId.equals(lastChallengeSessionId) && (now - lastChallengeTimestamp < 25000L)) {
+            Log.d(TAG, "Ignoring duplicate challenge event for session: " + sessionId);
+            return;
+        }
+        lastChallengeSessionId = sessionId;
+        lastChallengeTimestamp = now;
 
         // 0. Save active challenge into shared preferences so MainActivity renders it instantly
         SharedPreferences prefs = getSharedPreferences("pc_auth_prefs", Context.MODE_PRIVATE);

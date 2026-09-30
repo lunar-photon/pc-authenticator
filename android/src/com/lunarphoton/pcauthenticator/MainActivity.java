@@ -884,6 +884,9 @@ public class MainActivity extends Activity {
                         String chId = ch.optString("session_id", ch.optString("id", null));
                         String msg = "Login requested for " + user + " on " + host + ". Tap Approve to unlock.";
 
+                        String currentId = getSharedPreferences("pc_auth_prefs", Context.MODE_PRIVATE).getString("active_challenge_id", null);
+                        boolean isNew = (chId != null && !chId.equals(currentId)) || (layoutChallenge.getVisibility() != View.VISIBLE);
+
                         if (chId != null) {
                             getSharedPreferences("pc_auth_prefs", Context.MODE_PRIVATE).edit()
                                     .putString("active_challenge_id", chId)
@@ -892,7 +895,9 @@ public class MainActivity extends Activity {
                                     .apply();
                         }
 
-                        runOnUiThread(() -> showChallengeWithDuration(msg, remaining));
+                        if (isNew) {
+                            runOnUiThread(() -> showChallengeWithDuration(msg, remaining));
+                        }
                     } else {
                         runOnUiThread(() -> {
                             if (layoutChallenge.getVisibility() == View.VISIBLE) {
@@ -915,26 +920,30 @@ public class MainActivity extends Activity {
             tvChallengeMessage.setText(message);
         }
         updateApproveButtonText();
+
+        boolean alreadyVisible = (layoutChallenge.getVisibility() == View.VISIBLE);
         layoutChallenge.setVisibility(View.VISIBLE);
         layoutIdle.setVisibility(View.GONE);
 
-        if (countDownTimer != null) {
-            countDownTimer.cancel();
+        if (!alreadyVisible) {
+            if (countDownTimer != null) {
+                countDownTimer.cancel();
+            }
+
+            countDownTimer = new CountDownTimer(seconds * 1000L, 1000) {
+                @Override
+                public void onTick(long millisUntilFinished) {
+                    tvTimer.setText("Expires in: " + (millisUntilFinished / 1000) + "s");
+                }
+
+                @Override
+                public void onFinish() {
+                    hideChallenge();
+                }
+            }.start();
+
+            vibrate(100);
         }
-
-        countDownTimer = new CountDownTimer(seconds * 1000L, 1000) {
-            @Override
-            public void onTick(long millisUntilFinished) {
-                tvTimer.setText("Expires in: " + (millisUntilFinished / 1000) + "s");
-            }
-
-            @Override
-            public void onFinish() {
-                hideChallenge();
-            }
-        }.start();
-
-        vibrate(100);
     }
 
     private void hideChallenge() {
@@ -2743,11 +2752,6 @@ public class MainActivity extends Activity {
         checkActiveChallenge();
         fetchMediaStatus();
         fetchLaptopStatus();
-
-        // Immediately wake connection if sleeping on backoff
-        try {
-            startService(new Intent(this, AuthService.class).setAction(AuthService.ACTION_RECONNECT));
-        } catch (Exception ignored) {}
 
         // Start battery-efficient periodic check while activity is in foreground (4.5s)
         pollRunnable = new Runnable() {

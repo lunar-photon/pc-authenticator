@@ -1373,18 +1373,24 @@ class AuthManager:
         }
 
     def create_request(self, user, duration=35):
-        session_id = str(uuid.uuid4())
-        hostname = socket.gethostname()
-        cfg = load_config()
-
+        now = time.time()
         with self.lock:
+            if self.current_session and self.current_session.get("status") == "pending":
+                if now < self.current_session.get("expires_at", 0) - 2:
+                    # Reuse active valid session so rapid PAM invocations attach to the same challenge
+                    return self.current_session
+
+            session_id = str(uuid.uuid4())
+            hostname = socket.gethostname()
+            cfg = load_config()
+
             self.current_session = {
                 "session_id": session_id,
                 "user": user,
                 "hostname": hostname,
-                "created_at": time.time(),
+                "created_at": now,
                 "duration": duration,
-                "expires_at": time.time() + duration,
+                "expires_at": now + duration,
                 "status": "pending"
             }
         
