@@ -182,6 +182,7 @@ public class CameraActivity extends Activity {
                 String devParam = currentDevice.isEmpty() ? "" : "&device=" + Uri.encode(currentDevice);
                 String urlStr = activeDevice.getBaseUrl() + "/api/camera/stream?quality=" + currentQuality + devParam;
                 conn = (HttpURLConnection) new URL(urlStr).openConnection();
+                NetworkUtils.applyTunnelHeaders(conn);
                 conn.setRequestMethod("GET");
                 conn.setConnectTimeout(6000);
                 conn.setReadTimeout(12000);
@@ -287,6 +288,7 @@ public class CameraActivity extends Activity {
                 String devParam = currentDevice.isEmpty() ? "" : "?device=" + Uri.encode(currentDevice);
                 String urlStr = activeDevice.getBaseUrl() + "/api/camera/snapshot" + devParam;
                 HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
+                NetworkUtils.applyTunnelHeaders(conn);
                 conn.setRequestMethod("GET");
                 conn.setConnectTimeout(5000);
                 conn.setReadTimeout(7000);

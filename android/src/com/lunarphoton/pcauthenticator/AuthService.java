@@ -106,6 +106,9 @@ public class AuthService extends Service {
             android.os.StrictMode.setVmPolicy(builder.build());
         } catch (Exception ignored) {}
         createNotificationChannels();
+        try {
+            java.net.URLConnection.setDefaultRequestProperty("ngrok-skip-browser-warning", "1");
+        } catch (Exception ignored) {}
 
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
         if (pm != null) {
@@ -275,6 +278,7 @@ public class AuthService extends Service {
         conn.setConnectTimeout(connectTimeoutMs);
         conn.setReadTimeout(60000); // 60s read timeout
         conn.setRequestProperty("Accept", "application/x-ndjson");
+        NetworkUtils.applyTunnelHeaders(conn);
         if (active.isPaired()) {
             conn.setRequestProperty("Authorization", "Bearer " + active.authToken);
         }
@@ -785,6 +789,7 @@ public class AuthService extends Service {
                 body.put("storage_total", storageTotal);
 
                 HttpURLConnection conn = (HttpURLConnection) new URL(active.getBaseUrl() + "/api/phone/status").openConnection();
+                NetworkUtils.applyTunnelHeaders(conn);
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json");
                 if (active.isPaired()) {
@@ -858,6 +863,7 @@ public class AuthService extends Service {
                 String mimeType = PCFileProvider.getMimeType(dest.getName());
 
                 HttpURLConnection conn = (HttpURLConnection) new URL(finalDownloadUrl).openConnection();
+                NetworkUtils.applyTunnelHeaders(conn);
                 conn.setConnectTimeout(10000);
                 conn.setReadTimeout(60000);
                 if (active != null && active.isPaired()) {
@@ -1093,6 +1099,7 @@ public class AuthService extends Service {
 
                 URL u = new URL(active.getBaseUrl() + "/api/telephony/call");
                 HttpURLConnection conn = (HttpURLConnection) u.openConnection();
+                NetworkUtils.applyTunnelHeaders(conn);
                 conn.setRequestMethod("POST");
                 conn.setConnectTimeout(3000);
                 conn.setReadTimeout(3000);
@@ -1215,6 +1222,7 @@ public class AuthService extends Service {
                 try {
                     String url = active.getBaseUrl() + "/api/clipboard";
                     HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                    NetworkUtils.applyTunnelHeaders(conn);
                     conn.setRequestMethod("POST");
                     conn.setConnectTimeout(4000);
                     conn.setReadTimeout(4000);

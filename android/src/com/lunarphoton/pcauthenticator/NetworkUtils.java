@@ -9,6 +9,14 @@ import java.net.URL;
 
 public class NetworkUtils {
 
+    public static void applyTunnelHeaders(HttpURLConnection conn) {
+        if (conn != null) {
+            try {
+                conn.setRequestProperty("ngrok-skip-browser-warning", "1");
+            } catch (Exception ignored) {}
+        }
+    }
+
     public static String httpGet(String urlStr, int timeoutMs) {
         return httpGetWithAuth(urlStr, null, timeoutMs);
     }
@@ -22,6 +30,7 @@ public class NetworkUtils {
             conn.setConnectTimeout(timeoutMs);
             conn.setReadTimeout(timeoutMs);
             conn.setRequestProperty("Accept", "application/json");
+            applyTunnelHeaders(conn);
             if (authToken != null && !authToken.isEmpty()) {
                 conn.setRequestProperty("Authorization", "Bearer " + authToken);
             }
@@ -53,6 +62,7 @@ public class NetworkUtils {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json");
             conn.setRequestProperty("Accept", "application/json");
+            applyTunnelHeaders(conn);
 
             if (jsonBody != null && !jsonBody.isEmpty()) {
                 try (OutputStream os = conn.getOutputStream()) {
@@ -86,6 +96,7 @@ public class NetworkUtils {
             conn.setReadTimeout(timeoutMs);
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json");
+            applyTunnelHeaders(conn);
 
             if (authToken != null && !authToken.isEmpty()) {
                 conn.setRequestProperty("Authorization", "Bearer " + authToken);

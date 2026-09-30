@@ -157,6 +157,9 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        try {
+            java.net.URLConnection.setDefaultRequestProperty("ngrok-skip-browser-warning", "1");
+        } catch (Exception ignored) {}
 
         // 1. Allow Activity to show and turn on screen over lock screen
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
@@ -1317,6 +1320,7 @@ public class MainActivity extends Activity {
                 PairedDevice active = DeviceManager.getActiveDevice(this);
                 String uploadUrl = active.getBaseUrl() + "/api/files/upload";
                 HttpURLConnection conn = (HttpURLConnection) new URL(uploadUrl).openConnection();
+                NetworkUtils.applyTunnelHeaders(conn);
                 conn.setRequestMethod("POST");
                 conn.setDoOutput(true);
                 conn.setConnectTimeout(10000);
@@ -1388,6 +1392,7 @@ public class MainActivity extends Activity {
                     PairedDevice active = DeviceManager.getActiveDevice(this);
                     String url = active.getBaseUrl() + "/api/clipboard";
                     HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                    NetworkUtils.applyTunnelHeaders(conn);
                     conn.setRequestMethod("POST");
                     conn.setRequestProperty("Content-Type", "application/json");
                     if (active.isPaired()) {
@@ -1422,6 +1427,7 @@ public class MainActivity extends Activity {
                 PairedDevice active = DeviceManager.getActiveDevice(this);
                 String url = active.getBaseUrl() + "/api/clipboard";
                 HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                NetworkUtils.applyTunnelHeaders(conn);
                 conn.setRequestMethod("GET");
                 if (active.isPaired()) {
                     conn.setRequestProperty("Authorization", "Bearer " + active.authToken);
@@ -1460,6 +1466,7 @@ public class MainActivity extends Activity {
                 PairedDevice active = DeviceManager.getActiveDevice(this);
                 String url = active.getBaseUrl() + "/api/ping";
                 HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                NetworkUtils.applyTunnelHeaders(conn);
                 conn.setRequestMethod("POST");
                 conn.setDoOutput(true);
                 if (active.isPaired()) {
@@ -1484,6 +1491,7 @@ public class MainActivity extends Activity {
                 if (active == null) return;
                 String url = active.getBaseUrl() + "/api/action";
                 HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                NetworkUtils.applyTunnelHeaders(conn);
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json");
                 conn.setConnectTimeout(4000);
@@ -1750,6 +1758,7 @@ public class MainActivity extends Activity {
                 if (active == null) return;
                 String url = active.getBaseUrl() + "/api/action";
                 HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                NetworkUtils.applyTunnelHeaders(conn);
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json");
                 conn.setConnectTimeout(6000);
@@ -1805,6 +1814,7 @@ public class MainActivity extends Activity {
                 if (active == null) return;
                 String url = active.getBaseUrl() + "/api/pc/status";
                 HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                NetworkUtils.applyTunnelHeaders(conn);
                 conn.setRequestMethod("GET");
                 conn.setConnectTimeout(3000);
                 conn.setReadTimeout(3000);
@@ -1936,6 +1946,7 @@ public class MainActivity extends Activity {
                     PairedDevice active = DeviceManager.getActiveDevice(this);
                     String url = active.getBaseUrl() + "/api/screen/screenshot";
                     HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                    NetworkUtils.applyTunnelHeaders(conn);
                     conn.setRequestMethod("GET");
                     conn.setConnectTimeout(8000);
                     conn.setReadTimeout(10000);
@@ -2050,6 +2061,7 @@ public class MainActivity extends Activity {
                     PairedDevice active = DeviceManager.getActiveDevice(this);
                     String url = active.getBaseUrl() + "/api/files/search?q=" + URLEncoder.encode(q, "UTF-8");
                     HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                    NetworkUtils.applyTunnelHeaders(conn);
                     conn.setRequestMethod("GET");
                     conn.setConnectTimeout(8000);
                     conn.setReadTimeout(12000);
@@ -2135,6 +2147,7 @@ public class MainActivity extends Activity {
                 PairedDevice active = DeviceManager.getActiveDevice(this);
                 String url = active.getBaseUrl() + "/api/files/download_pc?path=" + URLEncoder.encode(pcPath, "UTF-8");
                 HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                NetworkUtils.applyTunnelHeaders(conn);
                 conn.setRequestMethod("GET");
                 conn.setConnectTimeout(10000);
                 conn.setReadTimeout(60000);
@@ -2347,6 +2360,7 @@ public class MainActivity extends Activity {
                         PairedDevice active = DeviceManager.getActiveDevice(MainActivity.this);
                         String url = active.getBaseUrl() + "/api/laptop/files/list?path=" + URLEncoder.encode(targetPath, "UTF-8");
                         HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                        NetworkUtils.applyTunnelHeaders(conn);
                         conn.setRequestMethod("GET");
                         conn.setConnectTimeout(8000);
                         conn.setReadTimeout(12000);
@@ -2511,6 +2525,7 @@ public class MainActivity extends Activity {
                     PairedDevice active = DeviceManager.getActiveDevice(this);
                     String endpoint = active.getBaseUrl() + "/api/open_url";
                     HttpURLConnection conn = (HttpURLConnection) new URL(endpoint).openConnection();
+                    NetworkUtils.applyTunnelHeaders(conn);
                     conn.setRequestMethod("POST");
                     conn.setRequestProperty("Content-Type", "application/json");
                     if (active.isPaired()) {
@@ -2547,6 +2562,7 @@ public class MainActivity extends Activity {
                 PairedDevice active = DeviceManager.getActiveDevice(this);
                 String url = active.getBaseUrl() + "/api/media/command";
                 HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                NetworkUtils.applyTunnelHeaders(conn);
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json");
                 conn.setDoOutput(true);
@@ -2569,6 +2585,7 @@ public class MainActivity extends Activity {
                 PairedDevice active = DeviceManager.getActiveDevice(this);
                 String url = active.getBaseUrl() + "/api/media/status";
                 HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                NetworkUtils.applyTunnelHeaders(conn);
                 conn.setRequestMethod("GET");
                 conn.setConnectTimeout(2000);
                 conn.setReadTimeout(2000);

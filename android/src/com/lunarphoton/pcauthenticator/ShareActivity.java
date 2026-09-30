@@ -82,6 +82,7 @@ public class ShareActivity extends Activity {
                 String endpoint = isWebpage ? "/api/open_url" : "/api/clipboard";
                 String urlStr = active.getBaseUrl() + endpoint;
                 HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
+                NetworkUtils.applyTunnelHeaders(conn);
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json");
                 if (active.isPaired()) {
@@ -151,6 +152,7 @@ public class ShareActivity extends Activity {
                 String filename = getFileName(uri);
                 try {
                     HttpURLConnection conn = (HttpURLConnection) new URL(uploadUrl).openConnection();
+                    NetworkUtils.applyTunnelHeaders(conn);
                     conn.setRequestMethod("POST");
                     conn.setDoOutput(true);
                     conn.setConnectTimeout(10000);

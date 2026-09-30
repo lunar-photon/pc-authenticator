@@ -504,6 +504,7 @@ public class TrackpadActivity extends Activity implements SensorEventListener {
                     String endpoint = isUrl ? "/api/open_url" : "/api/clipboard";
                     String urlStr = activeDevice.getBaseUrl() + endpoint;
                     HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
+                    NetworkUtils.applyTunnelHeaders(conn);
                     conn.setRequestMethod("POST");
                     conn.setRequestProperty("Content-Type", "application/json");
                     if (activeDevice.isPaired()) {
@@ -635,6 +636,7 @@ public class TrackpadActivity extends Activity implements SensorEventListener {
                         try {
                             String urlStr = activeDevice.getBaseUrl() + "/api/mouse";
                             HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
+                            NetworkUtils.applyTunnelHeaders(conn);
                             conn.setRequestMethod("POST");
                             conn.setRequestProperty("Content-Type", "application/json");
                             if (activeDevice.isPaired()) {

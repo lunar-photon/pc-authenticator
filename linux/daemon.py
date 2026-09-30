@@ -97,16 +97,21 @@ def get_auth_token_from_request(handler):
 
 def is_tunnel_request(handler):
     headers = handler.headers
-    return bool(headers.get('CF-Ray') or headers.get('CF-Connecting-IP') or headers.get('CDN-Loop'))
+    return bool(
+        headers.get('CF-Ray') or
+        headers.get('CF-Connecting-IP') or
+        headers.get('CDN-Loop') or
+        headers.get('ngrok-trace-id') or
+        headers.get('ngrok-agent-ips') or
+        (headers.get('X-Forwarded-Proto') and headers.get('X-Forwarded-For'))
+    )
 
 def get_effective_client_ip(handler):
     if is_tunnel_request(handler):
-        cf_ip = handler.headers.get('CF-Connecting-IP')
-        if cf_ip:
-            return cf_ip.strip()
-        xff = handler.headers.get('X-Forwarded-For')
-        if xff:
-            return xff.split(',')[0].strip()
+        for header_name in ('CF-Connecting-IP', 'ngrok-agent-ips', 'X-Forwarded-For', 'X-Real-IP'):
+            val = handler.headers.get(header_name)
+            if val:
+                return val.split(',')[0].strip()
     return handler.client_address[0]
 
 def authenticate_client(handler, cfg):
@@ -1447,7 +1452,7 @@ class AuthManager:
 auth_mgr = AuthManager()
 
 # ==========================================
-# Cloudflare Internet Tunnel Manager
+# High-Speed Internet Tunnel Manager (Ngrok & Cloudflare)
 # ==========================================
 
 class TunnelManager:
@@ -1458,8 +1463,30 @@ class TunnelManager:
         self.lock = threading.Lock()
         self.running = False
         self._thread = None
+        self.provider = "none"
 
-    def _find_binary(self):
+    def _find_ngrok(self):
+        p = shutil.which('ngrok')
+        if p and os.path.isfile(p):
+            return p
+        cand = os.path.expanduser('~/.local/bin/ngrok')
+        if os.path.isfile(cand) and os.access(cand, os.X_OK):
+            return cand
+        return None
+
+    def _has_ngrok_token(self):
+        cfg_path = os.path.expanduser('~/.config/ngrok/ngrok.yml')
+        if os.path.exists(cfg_path):
+            try:
+                with open(cfg_path, 'r') as f:
+                    content = f.read()
+                    if 'authtoken:' in content and 'authtoken: ""' not in content:
+                        return True
+            except Exception:
+                pass
+        return False
+
+    def _find_cloudflared(self):
         p = shutil.which('cloudflared')
         if p and os.path.isfile(p):
             return p
@@ -1474,22 +1501,112 @@ class TunnelManager:
                 return c
         return None
 
+    def get_provider(self):
+        with self.lock:
+            return self.provider
+
     def start(self):
         cfg = load_config()
         if not cfg.get("enable_internet_tunnel", True):
             sys.stderr.write("🌐 Internet tunnel is disabled in config.json\n")
             return
-        bin_path = self._find_binary()
-        if not bin_path:
-            sys.stderr.write("⚠️ cloudflared binary not found; internet tunnel disabled.\n")
-            return
+
         if self.running and self._thread and self._thread.is_alive():
             return
         self.running = True
-        self._thread = threading.Thread(target=self._run_loop, args=(bin_path,), daemon=True)
+        self._thread = threading.Thread(target=self._run_supervisor_loop, daemon=True)
         self._thread.start()
 
-    def _run_loop(self, bin_path):
+    def _run_supervisor_loop(self):
+        while self.running:
+            cfg = load_config()
+            pref = cfg.get("tunnel_provider", "both").lower()
+            if pref == "none":
+                time.sleep(5)
+                continue
+
+            ngrok_bin = self._find_ngrok()
+            has_ngrok = bool(ngrok_bin and self._has_ngrok_token())
+            cf_bin = self._find_cloudflared()
+
+            if pref in ("both", "ngrok") and has_ngrok:
+                with self.lock:
+                    self.provider = "ngrok"
+                success = self._run_ngrok_loop(ngrok_bin)
+                if not success and pref == "both" and cf_bin and self.running:
+                    sys.stderr.write("⚠️ Ngrok failed or exited quickly; falling back to Cloudflare...\n")
+                    with self.lock:
+                        self.provider = "cloudflare"
+                    self._run_cloudflare_loop(cf_bin)
+            elif pref in ("both", "cloudflare") and cf_bin:
+                with self.lock:
+                    self.provider = "cloudflare"
+                self._run_cloudflare_loop(cf_bin)
+            else:
+                sys.stderr.write("⚠️ No tunnel provider found (Ngrok or Cloudflare); retrying in 10s...\n")
+                time.sleep(10)
+
+    def _run_ngrok_loop(self, bin_path):
+        import re
+        cfg = load_config()
+        static_url = cfg.get("ngrok_url")
+        start_time = time.time()
+        had_connection = False
+        while self.running:
+            sys.stderr.write(f"🌐 Starting Ngrok High-Speed Tunnel on port {self.port}...\n")
+            cmd = [bin_path, 'http', str(self.port), '--log=stdout']
+            if static_url:
+                cmd.extend(['--url', static_url])
+            try:
+                self.process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1
+                )
+                for line in iter(self.process.stdout.readline, ''):
+                    if not self.running:
+                        break
+                    line_clean = line.strip()
+                    m = re.search(r'url=(https://[^\s]+)', line_clean)
+                    if m:
+                        had_connection = True
+                        new_url = m.group(1).rstrip('/')
+                        with self.lock:
+                            changed = (self.tunnel_url != new_url)
+                            self.tunnel_url = new_url
+                        sys.stderr.write(f"\n==================================================\n")
+                        sys.stderr.write(f"🌐 Ngrok Internet Tunnel ONLINE (Provider: ngrok):\n")
+                        sys.stderr.write(f"   👉 {new_url}\n")
+                        sys.stderr.write(f"==================================================\n\n")
+                        sys.stderr.flush()
+                        if changed:
+                            try:
+                                auth_mgr.broadcast_ndjson(json.dumps({
+                                    "event": "tunnel_update",
+                                    "internet_url": new_url,
+                                    "provider": "ngrok"
+                                }) + "\n")
+                            except Exception:
+                                pass
+
+                self.process.wait()
+            except Exception as e:
+                sys.stderr.write(f"Ngrok process error: {e}\n")
+
+            if not self.running:
+                break
+            with self.lock:
+                self.tunnel_url = None
+            if not had_connection and (time.time() - start_time) < 15:
+                # Exited quickly without connection -> allow supervisor fallback
+                return False
+            sys.stderr.write("🌐 Ngrok tunnel disconnected, restarting in 5s...\n")
+            time.sleep(5)
+        return had_connection
+
+    def _run_cloudflare_loop(self, bin_path):
         import re
         url_regex = re.compile(r'(https://[a-zA-Z0-9-]+\.trycloudflare\.com)')
         while self.running:
@@ -1514,13 +1631,17 @@ class TunnelManager:
                             changed = (self.tunnel_url != new_url)
                             self.tunnel_url = new_url
                         sys.stderr.write(f"\n==================================================\n")
-                        sys.stderr.write(f"🌐 Cloudflare Internet Tunnel ONLINE:\n")
+                        sys.stderr.write(f"🌐 Cloudflare Internet Tunnel ONLINE (Provider: cloudflare):\n")
                         sys.stderr.write(f"   👉 {new_url}\n")
                         sys.stderr.write(f"==================================================\n\n")
                         sys.stderr.flush()
                         if changed:
                             try:
-                                auth_mgr.broadcast_ndjson(json.dumps({"event": "tunnel_update", "internet_url": new_url}) + "\n")
+                                auth_mgr.broadcast_ndjson(json.dumps({
+                                    "event": "tunnel_update",
+                                    "internet_url": new_url,
+                                    "provider": "cloudflare"
+                                }) + "\n")
                             except Exception:
                                 pass
 
@@ -1532,7 +1653,7 @@ class TunnelManager:
                 break
             with self.lock:
                 self.tunnel_url = None
-            sys.stderr.write("🌐 Tunnel disconnected, restarting in 5s...\n")
+            sys.stderr.write("🌐 Cloudflare tunnel disconnected, restarting in 5s...\n")
             time.sleep(5)
 
     def get_url(self):
@@ -1636,7 +1757,8 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
                 "offline_apk_ready": True,
                 "paired_clients_count": len(cfg.get('paired_clients', {})),
                 "local_url": f"http://{local_ip}:{port}",
-                "internet_url": tunnel_mgr.get_url()
+                "internet_url": tunnel_mgr.get_url(),
+                "tunnel_provider": tunnel_mgr.get_provider()
             })
             return
         elif path == '/api/events':
