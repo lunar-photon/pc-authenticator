@@ -98,12 +98,16 @@ public class MainActivity extends Activity {
     private TextView tvPcUptime;
     private TextView tvPcCpu;
     private TextView tvPcMemory;
+    private TextView tvPcStorage;
     private TextView tvPcWeather;
     private Button btnLockLaptopAction;
     private Button btnScreenshotAction;
+    private Button btnBrowseLaptopAction;
     private Button btnSearchFilesAction;
     private boolean isPcCurrentlyLocked = false;
     private Bitmap currentScreenshotBitmap = null;
+    private String currentBrowsePath = "shortcuts";
+    private String parentBrowsePath = null;
 
     private LinearLayout layoutChallenge;
     private TextView tvChallengeMessage;
@@ -214,9 +218,11 @@ public class MainActivity extends Activity {
         tvPcUptime = findViewById(R.id.tv_pc_uptime);
         tvPcCpu = findViewById(R.id.tv_pc_cpu);
         tvPcMemory = findViewById(R.id.tv_pc_memory);
+        tvPcStorage = findViewById(R.id.tv_pc_storage);
         tvPcWeather = findViewById(R.id.tv_pc_weather);
         btnLockLaptopAction = findViewById(R.id.btn_lock_laptop_action);
         btnScreenshotAction = findViewById(R.id.btn_screenshot_action);
+        btnBrowseLaptopAction = findViewById(R.id.btn_browse_laptop_action);
         btnSearchFilesAction = findViewById(R.id.btn_search_files_action);
 
         if (btnLockLaptopAction != null) {
@@ -224,6 +230,9 @@ public class MainActivity extends Activity {
         }
         if (btnScreenshotAction != null) {
             btnScreenshotAction.setOnClickListener(v -> showScreenshotDialog());
+        }
+        if (btnBrowseLaptopAction != null) {
+            btnBrowseLaptopAction.setOnClickListener(v -> showFileBrowseDialog());
         }
         if (btnSearchFilesAction != null) {
             btnSearchFilesAction.setOnClickListener(v -> showFileSearchDialog());
@@ -1417,8 +1426,25 @@ public class MainActivity extends Activity {
                     JSONObject cpu = res.optJSONObject("cpu");
                     JSONObject mem = res.optJSONObject("memory");
                     JSONObject up = res.optJSONObject("uptime");
-                    String weatherStr = res.optString("weather", "");
+                    JSONObject stor = res.optJSONObject("storage");
 
+                    String weatherFormatted = res.optString("weather_formatted", "");
+                    if (weatherFormatted.isEmpty() || "Weather Unavailable".equalsIgnoreCase(weatherFormatted)) {
+                        JSONObject weatherObj = res.optJSONObject("weather");
+                        if (weatherObj != null) {
+                            weatherFormatted = weatherObj.optString("formatted", "");
+                            if (weatherFormatted.isEmpty()) {
+                                String city = weatherObj.optString("city", "");
+                                String temp = weatherObj.optString("temp_c", "");
+                                String desc = weatherObj.optString("desc", "");
+                                if (!city.isEmpty()) {
+                                    weatherFormatted = city + " • " + temp + "°C, " + desc;
+                                }
+                            }
+                        }
+                    }
+
+                    final String finalWeather = weatherFormatted;
                     runOnUiThread(() -> {
                         if (tvPcLockBadge != null) {
                             if (locked) {
@@ -1450,8 +1476,14 @@ public class MainActivity extends Activity {
                             int pct = mem.optInt("used_pct", 0);
                             tvPcMemory.setText(String.format(Locale.US, "💾 RAM: %.1f / %.1f GB (%d%%)", used, total, pct));
                         }
-                        if (tvPcWeather != null && !weatherStr.isEmpty()) {
-                            tvPcWeather.setText("🌤️ " + weatherStr);
+                        if (tvPcStorage != null && stor != null) {
+                            String sf = stor.optString("formatted", "");
+                            if (!sf.isEmpty()) {
+                                tvPcStorage.setText("💽 Disk: " + sf);
+                            }
+                        }
+                        if (tvPcWeather != null && !finalWeather.isEmpty() && !finalWeather.startsWith("{")) {
+                            tvPcWeather.setText("🌤️ " + finalWeather);
                         }
                     });
                 }
@@ -1768,6 +1800,164 @@ public class MainActivity extends Activity {
         } catch (Exception e) {
             Toast.makeText(this, "Saved to Downloads: " + file.getName(), Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private void showFileBrowseDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_file_browse, null);
+        builder.setView(dialogView);
+
+        TextView tvStorage = dialogView.findViewById(R.id.tv_browser_storage);
+        Button btnHome = dialogView.findViewById(R.id.btn_browse_home);
+        Button btnUp = dialogView.findViewById(R.id.btn_browse_up);
+        TextView tvPath = dialogView.findViewById(R.id.tv_browse_path);
+        Button btnRefresh = dialogView.findViewById(R.id.btn_browse_refresh);
+
+        Button btnQuickDownloads = dialogView.findViewById(R.id.btn_shortcut_downloads);
+        Button btnQuickDocs = dialogView.findViewById(R.id.btn_shortcut_documents);
+        Button btnQuickPics = dialogView.findViewById(R.id.btn_shortcut_pictures);
+        Button btnQuickVids = dialogView.findViewById(R.id.btn_shortcut_videos);
+        Button btnQuickDesk = dialogView.findViewById(R.id.btn_shortcut_desktop);
+
+        ProgressBar pbLoading = dialogView.findViewById(R.id.pb_browse_loading);
+        TextView tvEmpty = dialogView.findViewById(R.id.tv_browse_empty);
+        LinearLayout containerItems = dialogView.findViewById(R.id.container_browse_items);
+
+        AlertDialog dialog = builder.create();
+
+        class BrowseLoader {
+            void load(String targetPath) {
+                currentBrowsePath = targetPath;
+                pbLoading.setVisibility(View.VISIBLE);
+                tvEmpty.setVisibility(View.GONE);
+                containerItems.removeAllViews();
+
+                new Thread(() -> {
+                    try {
+                        PairedDevice active = DeviceManager.getActiveDevice(MainActivity.this);
+                        String url = active.getBaseUrl() + "/api/laptop/files/list?path=" + URLEncoder.encode(targetPath, "UTF-8");
+                        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                        conn.setRequestMethod("GET");
+                        conn.setConnectTimeout(8000);
+                        conn.setReadTimeout(12000);
+                        if (active.isPaired()) {
+                            conn.setRequestProperty("Authorization", "Bearer " + active.authToken);
+                        }
+                        int code = conn.getResponseCode();
+                        if (code == 200) {
+                            StringBuilder sb = new StringBuilder();
+                            try (BufferedReader r = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"))) {
+                                String line;
+                                while ((line = r.readLine()) != null) sb.append(line);
+                            }
+                            JSONObject res = new JSONObject(sb.toString());
+                            String curPath = res.optString("current_path", targetPath);
+                            parentBrowsePath = res.isNull("parent_path") ? null : res.optString("parent_path", null);
+                            JSONObject stor = res.optJSONObject("storage");
+                            String storStr = (stor != null) ? stor.optString("formatted", "") : "";
+                            JSONArray items = res.optJSONArray("items");
+
+                            runOnUiThread(() -> {
+                                pbLoading.setVisibility(View.GONE);
+                                if (!storStr.isEmpty()) {
+                                    tvStorage.setText(storStr);
+                                    if (tvPcStorage != null) tvPcStorage.setText("💽 Disk: " + storStr);
+                                }
+                                String dispPath = curPath;
+                                if (dispPath.startsWith("/home/")) {
+                                    int nextSlash = dispPath.indexOf('/', 6);
+                                    if (nextSlash > 0) dispPath = "~" + dispPath.substring(nextSlash);
+                                    else dispPath = "~";
+                                }
+                                tvPath.setText("shortcuts".equals(dispPath) ? "Shortcuts" : dispPath);
+                                btnUp.setEnabled(parentBrowsePath != null);
+                                btnUp.setAlpha(parentBrowsePath != null ? 1.0f : 0.4f);
+
+                                if (items == null || items.length() == 0) {
+                                    tvEmpty.setVisibility(View.VISIBLE);
+                                    return;
+                                }
+
+                                LayoutInflater inflater = LayoutInflater.from(MainActivity.this);
+                                for (int i = 0; i < items.length(); i++) {
+                                    JSONObject it = items.optJSONObject(i);
+                                    if (it == null) continue;
+                                    String name = it.optString("name", "Unknown");
+                                    String itemPath = it.optString("path", "");
+                                    boolean isDir = it.optBoolean("is_dir", false);
+                                    String sizeFormatted = it.optString("size_formatted", "");
+                                    String customIcon = it.optString("icon", "");
+
+                                    View row = inflater.inflate(R.layout.item_file_browse, containerItems, false);
+                                    TextView tvIcon = row.findViewById(R.id.tv_browse_item_icon);
+                                    TextView tvName = row.findViewById(R.id.tv_browse_item_name);
+                                    TextView tvDetails = row.findViewById(R.id.tv_browse_item_details);
+                                    Button btnAction = row.findViewById(R.id.btn_browse_item_action);
+
+                                    tvName.setText(name);
+                                    if (isDir) {
+                                        tvIcon.setText(!customIcon.isEmpty() ? customIcon : "📁");
+                                        tvDetails.setText("Directory / Folder");
+                                        btnAction.setText("Open");
+                                        btnAction.setBackgroundResource(R.drawable.card_bg);
+                                        btnAction.setOnClickListener(v -> load(itemPath));
+                                        row.setOnClickListener(v -> load(itemPath));
+                                    } else {
+                                        String lower = name.toLowerCase();
+                                        if (lower.endsWith(".pdf")) tvIcon.setText("📕");
+                                        else if (lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".webp") || lower.endsWith(".gif")) tvIcon.setText("🖼️");
+                                        else if (lower.endsWith(".mp4") || lower.endsWith(".mkv") || lower.endsWith(".mov") || lower.endsWith(".avi")) tvIcon.setText("🎥");
+                                        else if (lower.endsWith(".mp3") || lower.endsWith(".wav") || lower.endsWith(".flac") || lower.endsWith(".m4a")) tvIcon.setText("🎵");
+                                        else if (lower.endsWith(".zip") || lower.endsWith(".tar") || lower.endsWith(".gz") || lower.endsWith(".7z")) tvIcon.setText("📦");
+                                        else if (lower.endsWith(".apk")) tvIcon.setText("📱");
+                                        else if (lower.endsWith(".txt") || lower.endsWith(".md") || lower.endsWith(".py") || lower.endsWith(".java") || lower.endsWith(".c") || lower.endsWith(".sh")) tvIcon.setText("📝");
+                                        else tvIcon.setText("📄");
+
+                                        tvDetails.setText(sizeFormatted);
+                                        btnAction.setText("📥 Get");
+                                        btnAction.setBackgroundResource(R.drawable.btn_approve);
+                                        btnAction.setOnClickListener(v -> downloadFileFromLaptop(itemPath, name, null));
+                                        row.setOnClickListener(v -> downloadFileFromLaptop(itemPath, name, null));
+                                    }
+
+                                    containerItems.addView(row);
+                                }
+                            });
+                        } else {
+                            runOnUiThread(() -> {
+                                pbLoading.setVisibility(View.GONE);
+                                tvEmpty.setText("Failed to load folder (HTTP " + code + ")");
+                                tvEmpty.setVisibility(View.VISIBLE);
+                            });
+                        }
+                    } catch (Exception e) {
+                        runOnUiThread(() -> {
+                            pbLoading.setVisibility(View.GONE);
+                            tvEmpty.setText("Error: " + e.getMessage());
+                            tvEmpty.setVisibility(View.VISIBLE);
+                        });
+                    }
+                }).start();
+            }
+        }
+
+        BrowseLoader loader = new BrowseLoader();
+        btnHome.setOnClickListener(v -> loader.load("shortcuts"));
+        btnUp.setOnClickListener(v -> {
+            if (parentBrowsePath != null) {
+                loader.load(parentBrowsePath);
+            }
+        });
+        btnRefresh.setOnClickListener(v -> loader.load(currentBrowsePath));
+
+        btnQuickDownloads.setOnClickListener(v -> loader.load("~/Downloads"));
+        btnQuickDocs.setOnClickListener(v -> loader.load("~/Documents"));
+        btnQuickPics.setOnClickListener(v -> loader.load("~/Pictures"));
+        btnQuickVids.setOnClickListener(v -> loader.load("~/Videos"));
+        btnQuickDesk.setOnClickListener(v -> loader.load("~/Desktop"));
+
+        loader.load("shortcuts");
+        dialog.show();
     }
 
     private void showOpenWebpageDialog() {

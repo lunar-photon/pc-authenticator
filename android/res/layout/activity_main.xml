@@ -206,6 +206,21 @@
                     android:textColor="@color/text_muted" />
             </LinearLayout>
 
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="6dp">
+
+                <TextView
+                    android:id="@+id/tv_pc_storage"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="💽 Disk: -- GB free / -- GB"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_white" />
+            </LinearLayout>
+
             <TextView
                 android:id="@+id/tv_pc_weather"
                 android:layout_width="match_parent"
@@ -231,7 +246,7 @@
                     android:textStyle="bold"
                     android:textColor="@color/text_white"
                     android:background="@drawable/btn_deny"
-                    android:layout_marginEnd="4dp" />
+                    android:layout_marginEnd="6dp" />
 
                 <Button
                     android:id="@+id/btn_screenshot_action"
@@ -242,8 +257,26 @@
                     android:textSize="11sp"
                     android:textStyle="bold"
                     android:textColor="@color/text_white"
+                    android:background="@drawable/card_bg" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="6dp">
+
+                <Button
+                    android:id="@+id/btn_browse_laptop_action"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:text="📁 Browse Storage"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text_white"
                     android:background="@drawable/card_bg"
-                    android:layout_marginEnd="4dp" />
+                    android:layout_marginEnd="6dp" />
 
                 <Button
                     android:id="@+id/btn_search_files_action"

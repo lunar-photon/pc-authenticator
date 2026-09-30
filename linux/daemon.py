@@ -325,12 +325,16 @@ def get_weather_cached():
             desc = cur.get('weatherDesc', [{}])[0].get('value', 'Clear')
             humidity = cur.get('humidity', '--')
             feels_like = cur.get('FeelsLikeC', temp_c)
+            desc_clean = desc.strip()
+            feels_str = f" (Feels {feels_like}°C)" if feels_like and str(feels_like) != str(temp_c) else ""
+            formatted = f"{city} • {temp_c}°C{feels_str}, {desc_clean}"
             parsed = {
                 "city": city,
                 "temp_c": temp_c,
-                "desc": desc,
+                "desc": desc_clean,
                 "humidity": humidity,
                 "feels_like_c": feels_like,
+                "formatted": formatted,
                 "cached_at": int(now)
             }
             weather_cache["data"] = parsed
@@ -395,7 +399,21 @@ def get_pc_system_status():
     except Exception:
         pass
 
+    storage_info = {"total_gb": 0, "used_gb": 0, "free_gb": 0, "used_pct": 0, "formatted": "--"}
+    try:
+        du = shutil.disk_usage(os.path.expanduser('~'))
+        storage_info = {
+            "total_gb": round(du.total / (1024**3), 1),
+            "used_gb": round(du.used / (1024**3), 1),
+            "free_gb": round(du.free / (1024**3), 1),
+            "used_pct": round((du.used / du.total) * 100.0, 1),
+            "formatted": f"{round(du.free / (1024**3), 1)} GB free / {round(du.total / (1024**3), 1)} GB ({round((du.used / du.total) * 100.0)}%)"
+        }
+    except Exception:
+        pass
+
     weather = get_weather_cached()
+    weather_formatted = weather.get("formatted", "Weather Unavailable") if weather else "Weather Unavailable"
 
     return {
         "status": "ok",
@@ -405,7 +423,9 @@ def get_pc_system_status():
         "cpu": {"usage_pct": cpu_pct},
         "memory": mem_info,
         "uptime": uptime_info,
-        "weather": weather
+        "storage": storage_info,
+        "weather": weather,
+        "weather_formatted": weather_formatted
     }
 
 def capture_pc_screenshot():
@@ -1533,6 +1553,89 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             q = qs.get('q', [''])[0]
             results = search_laptop_files(q)
             self.send_json({"status": "ok", "query": q, "count": len(results), "results": results})
+            return
+
+        elif path == '/api/laptop/files/list':
+            req_path = unquote(qs.get('path', ['shortcuts'])[0])
+            home = os.path.realpath(os.path.expanduser('~'))
+
+            storage_info = {"total_gb": 0, "used_gb": 0, "free_gb": 0, "used_pct": 0, "formatted": "--"}
+            try:
+                du = shutil.disk_usage(home)
+                storage_info = {
+                    "total_gb": round(du.total / (1024**3), 1),
+                    "used_gb": round(du.used / (1024**3), 1),
+                    "free_gb": round(du.free / (1024**3), 1),
+                    "used_pct": round((du.used / du.total) * 100.0, 1),
+                    "formatted": f"{round(du.free / (1024**3), 1)} GB free / {round(du.total / (1024**3), 1)} GB ({round((du.used / du.total) * 100.0)}%)"
+                }
+            except Exception:
+                pass
+
+            if req_path in ('', 'shortcuts'):
+                shortcuts = [
+                    {"name": "🏠 Home", "path": home, "is_dir": True, "icon": "🏠", "size_formatted": "Folder"},
+                    {"name": "📥 Downloads", "path": os.path.join(home, "Downloads"), "is_dir": True, "icon": "📥", "size_formatted": "Folder"},
+                    {"name": "📄 Documents", "path": os.path.join(home, "Documents"), "is_dir": True, "icon": "📄", "size_formatted": "Folder"},
+                    {"name": "🖼️ Pictures", "path": os.path.join(home, "Pictures"), "is_dir": True, "icon": "🖼️", "size_formatted": "Folder"},
+                    {"name": "🎬 Videos", "path": os.path.join(home, "Videos"), "is_dir": True, "icon": "🎬", "size_formatted": "Folder"},
+                    {"name": "💻 Desktop", "path": os.path.join(home, "Desktop"), "is_dir": True, "icon": "💻", "size_formatted": "Folder"},
+                ]
+                existing_shortcuts = [s for s in shortcuts if os.path.exists(s["path"])]
+                self.send_json({
+                    "status": "ok",
+                    "current_path": "shortcuts",
+                    "parent_path": None,
+                    "storage": storage_info,
+                    "items": existing_shortcuts
+                })
+                return
+
+            req_path = os.path.realpath(os.path.expanduser(req_path))
+            if not req_path.startswith(home) and req_path != home:
+                self.send_json({"status": "error", "message": "Access restricted to home directory"}, status=403)
+                return
+
+            if not os.path.exists(req_path) or not os.path.isdir(req_path):
+                self.send_json({"status": "error", "message": "Directory not found"}, status=404)
+                return
+
+            parent_path = os.path.dirname(req_path) if req_path != home else "shortcuts"
+
+            items = []
+            try:
+                with os.scandir(req_path) as it:
+                    for entry in it:
+                        if entry.name.startswith('.'):
+                            continue
+                        try:
+                            is_dir = entry.is_dir(follow_symlinks=False)
+                            st = entry.stat(follow_symlinks=False)
+                            size_bytes = st.st_size if not is_dir else 0
+                            size_str = format_file_size(size_bytes) if not is_dir else "Folder"
+                            items.append({
+                                "name": entry.name,
+                                "path": entry.path,
+                                "is_dir": is_dir,
+                                "size": size_bytes,
+                                "size_formatted": size_str,
+                                "mtime": int(st.st_mtime)
+                            })
+                        except Exception:
+                            continue
+            except Exception as e:
+                self.send_json({"status": "error", "message": str(e)}, status=500)
+                return
+
+            items.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
+
+            self.send_json({
+                "status": "ok",
+                "current_path": req_path,
+                "parent_path": parent_path,
+                "storage": storage_info,
+                "items": items
+            })
             return
 
         elif path == '/api/files/download_pc':
