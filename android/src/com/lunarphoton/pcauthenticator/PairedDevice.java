@@ -32,7 +32,13 @@ public class PairedDevice {
     }
 
     public String getBaseUrl() {
-        return "http://" + ip + ":" + port;
+        if (ip == null || ip.isEmpty()) return "http://127.0.0.1:" + port;
+        String clean = ip.trim();
+        if (clean.startsWith("http://") || clean.startsWith("https://")) {
+            if (clean.endsWith("/")) clean = clean.substring(0, clean.length() - 1);
+            return clean;
+        }
+        return "http://" + clean + ":" + port;
     }
 
     public JSONObject toJsonObject() {
