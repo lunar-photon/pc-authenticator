@@ -2149,6 +2149,23 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
                 except Exception: pass
             return
 
+        elif path == '/api/files/stage/status':
+            token = qs.get('token', [''])[0]
+            staged = staged_files.get(token)
+            if not staged:
+                self.send_json({"error": "not_found", "status": "not_found"}, status=404)
+                return
+            self.send_json({
+                "status": "ok",
+                "token": token,
+                "filename": staged.get("filename"),
+                "downloaded": staged.get("downloaded", False),
+                "downloaded_at": staged.get("downloaded_at"),
+                "created_at": staged.get("created_at"),
+                "phone_connected": bool(auth_mgr.ndjson_clients)
+            })
+            return
+
         # 6. File Staging Download (PC to Phone pull)
         elif path.startswith('/api/files/staging/'):
             token = path.replace('/api/files/staging/', '').strip('/')
@@ -2173,6 +2190,10 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
                 with open(staged['filepath'], 'rb') as f:
                     while chunk := f.read(65536):
                         self.wfile.write(chunk)
+                self.wfile.flush()
+                staged['downloaded'] = True
+                staged['downloaded_at'] = time.time()
+                sys.stderr.write(f"📥 Staged file '{staged['filename']}' successfully downloaded by phone\n")
             except Exception as e:
                 try: self.send_error(500, str(e))
                 except Exception: pass
@@ -2777,14 +2798,24 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             if not filepath or not os.path.exists(filepath):
                 self.send_json({"error": "file_not_found"}, status=404)
                 return
+
+            now = time.time()
+            # Prune expired staged files older than 1 hour
+            for tok, item in list(staged_files.items()):
+                if now - item.get('created_at', 0) > 3600:
+                    staged_files.pop(tok, None)
+
             token = secrets.token_urlsafe(16)
             fn = os.path.basename(filepath)
             size = os.path.getsize(filepath)
             staged_files[token] = {
+                "token": token,
                 "filepath": filepath,
                 "filename": fn,
                 "size": size,
-                "created_at": time.time()
+                "created_at": now,
+                "downloaded": False,
+                "downloaded_at": None
             }
             local_ip = get_local_ip()
             cfg = load_config()
@@ -2800,12 +2831,14 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
                 "staging_path": f"/api/files/staging/{token}",
                 "size": size
             }) + "\n")
+            has_listeners = bool(auth_mgr.ndjson_clients)
             self.send_json({
                 "status": "ok",
                 "token": token,
                 "download_url": dl_url,
                 "internet_download_url": internet_dl_url,
-                "staging_path": f"/api/files/staging/{token}"
+                "staging_path": f"/api/files/staging/{token}",
+                "phone_connected": has_listeners
             })
 
         # 11. Phone Filesystem Mutations (Proxy)
@@ -3019,7 +3052,31 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
                     except Exception:
                         pass
 
-        # 3. Stream loop with keepalive
+        # 3. Push pending un-downloaded staged files from the last 15 minutes
+        now = time.time()
+        local_ip = get_local_ip()
+        cfg = load_config()
+        port = cfg.get('web_port', 1760)
+        tunnel_url = tunnel_mgr.get_url()
+        for s_token, s_info in list(staged_files.items()):
+            if not s_info.get("downloaded") and (now - s_info.get("created_at", 0) < 900):
+                if os.path.exists(s_info.get("filepath", "")):
+                    staged_event = {
+                        "event": "incoming_file",
+                        "filename": s_info["filename"],
+                        "download_url": f"http://{local_ip}:{port}/api/files/staging/{s_token}",
+                        "internet_download_url": f"{tunnel_url}/api/files/staging/{s_token}" if tunnel_url else None,
+                        "staging_path": f"/api/files/staging/{s_token}",
+                        "size": s_info["size"]
+                    }
+                    try:
+                        self.wfile.write((json.dumps(staged_event) + "\n").encode('utf-8'))
+                        self.wfile.flush()
+                        sys.stderr.write(f"🔄 Replayed pending staged file '{s_info['filename']}' to reconnected phone\n")
+                    except Exception:
+                        pass
+
+        # 4. Stream loop with keepalive
         try:
             while True:
                 try:

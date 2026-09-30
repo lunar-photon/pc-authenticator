@@ -29,6 +29,7 @@ import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.List;
+import java.util.ArrayList;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.HttpURLConnection;
@@ -822,94 +823,138 @@ public class AuthService extends Service {
     }
 
     private void handleIncomingFileEvent(JSONObject json) {
+        String stagingPath = json.optString("staging_path", "");
         String downloadUrl = json.optString("download_url", "");
+        String internetDl = json.optString("internet_download_url", "");
         String filename = json.optString("filename", "received_file");
-        if (downloadUrl.isEmpty()) return;
 
-        PairedDevice active = DeviceManager.getActiveDevice(this);
-        if (downloadUrl.startsWith("/")) {
-            if (active != null) downloadUrl = active.getBaseUrl() + downloadUrl;
-        } else if (DeviceManager.isInternetActive() && active != null) {
-            String internetDl = json.optString("internet_download_url", "");
-            if (!internetDl.isEmpty()) {
-                downloadUrl = internetDl;
+        if (stagingPath.isEmpty() && !downloadUrl.isEmpty()) {
+            if (downloadUrl.startsWith("/")) {
+                stagingPath = downloadUrl;
             } else {
                 try {
                     URL u = new URL(downloadUrl);
-                    downloadUrl = active.getBaseUrl() + u.getFile();
+                    stagingPath = u.getFile();
                 } catch (Exception ignored) {}
             }
         }
 
-        final String finalDownloadUrl = downloadUrl;
+        PairedDevice active = DeviceManager.getActiveDevice(this);
+        List<String> candidateUrls = new ArrayList<>();
+        if (active != null && !active.getBaseUrl().isEmpty() && !stagingPath.isEmpty()) {
+            String activeTarget = active.getBaseUrl() + stagingPath;
+            if (!candidateUrls.contains(activeTarget)) candidateUrls.add(activeTarget);
+        }
+        if (!internetDl.isEmpty() && !candidateUrls.contains(internetDl)) {
+            candidateUrls.add(internetDl);
+        }
+        if (!downloadUrl.isEmpty() && downloadUrl.startsWith("http") && !candidateUrls.contains(downloadUrl)) {
+            candidateUrls.add(downloadUrl);
+        }
+
+        if (candidateUrls.isEmpty()) return;
+
         new Thread(() -> {
-            try {
-                File destDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-                if (!destDir.exists()) destDir.mkdirs();
-                File dest = new File(destDir, filename);
-                int c = 1;
-                String base = filename;
-                String ext = "";
-                int dot = filename.lastIndexOf(".");
-                if (dot > 0) {
-                    base = filename.substring(0, dot);
-                    ext = filename.substring(dot);
-                }
-                while (dest.exists()) {
-                    dest = new File(destDir, base + " (" + c + ")" + ext);
-                    c++;
-                }
+            boolean success = false;
+            File dest = null;
+            String mimeType = "";
 
-                String mimeType = PCFileProvider.getMimeType(dest.getName());
-
-                HttpURLConnection conn = (HttpURLConnection) new URL(finalDownloadUrl).openConnection();
-                NetworkUtils.applyTunnelHeaders(conn);
-                conn.setConnectTimeout(10000);
-                conn.setReadTimeout(60000);
-                if (active != null && active.isPaired()) {
-                    conn.setRequestProperty("Authorization", "Bearer " + active.authToken);
-                }
-
+            for (String tryUrl : candidateUrls) {
+                HttpURLConnection conn = null;
                 OutputStream fos = null;
                 try {
-                    fos = new FileOutputStream(dest);
-                } catch (Exception directEx) {
-                    Log.w(TAG, "Direct FileOutputStream failed, trying MediaStore: " + directEx.getMessage());
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        try {
-                            ContentValues values = new ContentValues();
-                            values.put(MediaStore.MediaColumns.DISPLAY_NAME, dest.getName());
-                            values.put(MediaStore.MediaColumns.MIME_TYPE, mimeType);
-                            values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
-                            Uri insertedUri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
-                            if (insertedUri != null) {
-                                fos = getContentResolver().openOutputStream(insertedUri);
-                            }
-                        } catch (Exception mediaEx) {
-                            Log.e(TAG, "MediaStore insert error", mediaEx);
-                        }
+                    conn = (HttpURLConnection) new URL(tryUrl).openConnection();
+                    NetworkUtils.applyTunnelHeaders(conn);
+                    conn.setConnectTimeout(8000);
+                    conn.setReadTimeout(60000);
+                    if (active != null && active.isPaired()) {
+                        conn.setRequestProperty("Authorization", "Bearer " + active.authToken);
                     }
-                }
 
-                if (fos != null) {
-                    try (InputStream in = conn.getInputStream();
-                         OutputStream outStream = fos) {
-                        byte[] buf = new byte[65536];
-                        int r;
-                        while ((r = in.read(buf)) != -1) {
-                            outStream.write(buf, 0, r);
-                        }
-                        outStream.flush();
+                    int responseCode = conn.getResponseCode();
+                    if (responseCode != 200) {
+                        Log.w(TAG, "Candidate URL " + tryUrl + " returned HTTP " + responseCode);
+                        conn.disconnect();
+                        continue;
                     }
+
+                    File destDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+                    if (!destDir.exists()) destDir.mkdirs();
+                    dest = new File(destDir, filename);
+                    int c = 1;
+                    String base = filename;
+                    String ext = "";
+                    int dot = filename.lastIndexOf(".");
+                    if (dot > 0) {
+                        base = filename.substring(0, dot);
+                        ext = filename.substring(dot);
+                    }
+                    while (dest.exists()) {
+                        dest = new File(destDir, base + " (" + c + ")" + ext);
+                        c++;
+                    }
+
+                    mimeType = PCFileProvider.getMimeType(dest.getName());
 
                     try {
-                        MediaScannerConnection.scanFile(this, new String[]{dest.getAbsolutePath()}, new String[]{mimeType}, null);
-                    } catch (Exception ignored) {}
+                        fos = new FileOutputStream(dest);
+                    } catch (Exception directEx) {
+                        Log.w(TAG, "Direct FileOutputStream failed, trying MediaStore: " + directEx.getMessage());
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            try {
+                                ContentValues values = new ContentValues();
+                                values.put(MediaStore.MediaColumns.DISPLAY_NAME, dest.getName());
+                                values.put(MediaStore.MediaColumns.MIME_TYPE, mimeType);
+                                values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
+                                Uri insertedUri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                                if (insertedUri != null) {
+                                    fos = getContentResolver().openOutputStream(insertedUri);
+                                }
+                            } catch (Exception mediaEx) {
+                                Log.e(TAG, "MediaStore insert error", mediaEx);
+                            }
+                        }
+                    }
 
-                    showFileNotification(dest);
+                    if (fos != null) {
+                        try (InputStream in = conn.getInputStream();
+                             OutputStream outStream = fos) {
+                            byte[] buf = new byte[65536];
+                            int r;
+                            while ((r = in.read(buf)) != -1) {
+                                outStream.write(buf, 0, r);
+                            }
+                            outStream.flush();
+                        }
+                        success = true;
+                        break;
+                    }
+                } catch (Exception e) {
+                    Log.w(TAG, "Error trying URL " + tryUrl + ": " + e.getMessage());
+                    if (dest != null && dest.exists() && dest.length() == 0) {
+                        dest.delete();
+                    }
+                } finally {
+                    if (conn != null) {
+                        try { conn.disconnect(); } catch (Exception ignored) {}
+                    }
                 }
-            } catch (Exception e) {
-                Log.e(TAG, "Error downloading incoming file", e);
+            }
+
+            if (success && dest != null) {
+                try {
+                    MediaScannerConnection.scanFile(this, new String[]{dest.getAbsolutePath()}, new String[]{mimeType}, null);
+                } catch (Exception ignored) {}
+
+                showFileNotification(dest);
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    Toast.makeText(AuthService.this, "📥 Received: " + filename, Toast.LENGTH_SHORT).show();
+                });
+            } else {
+                Log.e(TAG, "Failed to download incoming file from all candidate URLs: " + filename);
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    Toast.makeText(AuthService.this, "❌ Failed to receive: " + filename, Toast.LENGTH_SHORT).show();
+                });
             }
         }).start();
     }

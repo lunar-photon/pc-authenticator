@@ -64,6 +64,14 @@ def get_device_token(client_id=None, ip=None):
         pass
     return None
 
+def check_stage_status(token):
+    try:
+        req = urllib.request.Request(f"{DAEMON_URL}/api/files/stage/status?token={quote(token)}")
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            return json.loads(resp.read().decode('utf-8'))
+    except Exception:
+        return None
+
 def send_file(filepath, phone_ip, phone_port=1761, auth_token=None):
     fn = os.path.basename(filepath)
     size = os.path.getsize(filepath)
@@ -89,7 +97,7 @@ def send_file(filepath, phone_ip, phone_port=1761, auth_token=None):
             )
             with urllib.request.urlopen(req, timeout=30) as resp:
                 if resp.status == 200:
-                    return True
+                    return "sent"
         except Exception:
             pass
 
@@ -110,7 +118,7 @@ def send_file(filepath, phone_ip, phone_port=1761, auth_token=None):
         )
         with urllib.request.urlopen(req, timeout=30) as resp:
             if resp.status == 200:
-                return True
+                return "sent"
     except Exception:
         pass
 
@@ -118,11 +126,24 @@ def send_file(filepath, phone_ip, phone_port=1761, auth_token=None):
     try:
         res = stage_file_fallback(filepath)
         if res.get('status') == 'ok':
-            return True
+            token = res.get('token')
+            phone_connected = res.get('phone_connected', False)
+            if not phone_connected or not token:
+                return "queued"
+
+            # Phone has an active listener. Poll status for up to 10s to verify receipt
+            for _ in range(20):
+                time.sleep(0.5)
+                status_res = check_stage_status(token)
+                if status_res and status_res.get('downloaded'):
+                    return "sent"
+                if status_res and not status_res.get('phone_connected', True):
+                    return "queued"
+            return "queued"
     except Exception:
         pass
 
-    return False
+    return "failed"
 
 def stage_file_fallback(filepath):
     req_data = json.dumps({"filepath": os.path.abspath(filepath)}).encode('utf-8')
@@ -193,22 +214,35 @@ def main():
     auth_token = get_device_token(target_cid, phone_ip)
 
     total = len(files)
-    success_count = 0
+    sent_count = 0
+    queued_count = 0
+    failed_count = 0
 
     for idx, f in enumerate(files, 1):
         fn = os.path.basename(f)
         notify("PC Connect", f"Transferring {fn} to {phone_name} ({idx}/{total})...", icon="network-transmit")
-        sent = send_file(f, phone_ip, phone_port, auth_token)
-        if sent:
-            success_count += 1
+        status = send_file(f, phone_ip, phone_port, auth_token)
+        if status == "sent":
+            sent_count += 1
+        elif status == "queued":
+            queued_count += 1
+        else:
+            failed_count += 1
 
-    if success_count == total:
+    if sent_count == total:
         if total == 1:
             notify("✅ File Sent", f"Successfully sent {os.path.basename(files[0])} to {phone_name}", icon="document-save")
         else:
             notify("✅ Files Sent", f"Successfully sent {total} files to {phone_name}", icon="document-save")
+    elif queued_count > 0 and failed_count == 0 and sent_count == 0:
+        if total == 1:
+            notify("⏳ Queued for Phone", f"{os.path.basename(files[0])} is queued. It will download automatically once {phone_name} connects.", icon="document-save")
+        else:
+            notify("⏳ Files Queued", f"{total} files are queued for {phone_name}. They will download automatically on connection.", icon="document-save")
+    elif queued_count > 0:
+        notify("⏳ Transfer Queued / Partial", f"{sent_count} sent, {queued_count} queued for {phone_name}, {failed_count} failed", icon="dialog-information")
     else:
-        notify("⚠️ Transfer Incomplete", f"Sent {success_count}/{total} files to {phone_name}", icon="dialog-warning")
+        notify("⚠️ Transfer Failed", f"Could not transfer {failed_count}/{total} files to {phone_name}", icon="dialog-warning")
 
 if __name__ == '__main__':
     main()
