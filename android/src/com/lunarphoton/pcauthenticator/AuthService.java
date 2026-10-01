@@ -182,8 +182,9 @@ public class AuthService extends Service {
                     @Override
                     public void onAvailable(Network network) {
                         boolean networkChanged = (lastKnownNetwork != null && !network.equals(lastKnownNetwork));
+                        boolean hadNoNetwork = (lastKnownNetwork == null);
                         lastKnownNetwork = network;
-                        if (networkChanged || currentConn != null) {
+                        if (networkChanged || (hadNoNetwork && currentConn == null)) {
                             boolean wifi = DeviceManager.isWifiActive(AuthService.this);
                             Log.i(TAG, "Network route changed/available (Wi-Fi=" + wifi + "). Rapidly adapting active connection...");
                             DeviceManager.setActiveUrl(AuthService.this, null);
@@ -430,8 +431,8 @@ public class AuthService extends Service {
                     updateForegroundNotification("⚠️ Authorization Required - Tap to Pair");
                 } else {
                     consecutiveFails++;
-                    broadcastStatus(false, "Server HTTP " + code);
-                    updateForegroundNotification("Server HTTP " + code);
+                    broadcastStatus(false, "Disconnected (Reconnecting...)");
+                    updateForegroundNotification("Searching for laptop...");
                 }
             } catch (Exception e) {
                 if (isSwitchingNetwork) {
@@ -711,7 +712,13 @@ public class AuthService extends Service {
                 .build();
     }
 
+    private String lastForegroundStatus = null;
+
     private void updateForegroundNotification(String status) {
+        if (status == null || status.equals(lastForegroundStatus)) {
+            return;
+        }
+        lastForegroundStatus = status;
         NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm != null) {
             nm.notify(NOTIFICATION_ID_FOREGROUND, buildForegroundNotification(status));
