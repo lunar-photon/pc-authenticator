@@ -85,9 +85,7 @@ public class TrackpadActivity extends Activity implements SensorEventListener {
 
         activeDevice = DeviceManager.getActiveDevice(this);
         if (DeviceManager.isInternetActive(this)) {
-            Toast.makeText(this, "🖱️ Trackpad & Laser is only available on local Wi-Fi", Toast.LENGTH_LONG).show();
-            finish();
-            return;
+            Toast.makeText(this, "🖱️ Operating via Internet Tunnel (UDP disabled)", Toast.LENGTH_SHORT).show();
         }
         vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
         sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
@@ -491,6 +489,14 @@ public class TrackpadActivity extends Activity implements SensorEventListener {
         } catch (Exception ignored) {}
     }
 
+    private String getTrackpadBaseUrl() {
+        if (activeDevice == null) return "";
+        if (DeviceManager.isWifiActive(this) && activeDevice.getLocalUrl() != null && !activeDevice.getLocalUrl().isEmpty()) {
+            return activeDevice.getLocalUrl();
+        }
+        return activeDevice.getBaseUrl();
+    }
+
     private void showKeyboardDialog() {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("⌨️ Type or Send to PC");
@@ -507,7 +513,7 @@ public class TrackpadActivity extends Activity implements SensorEventListener {
                 try {
                     boolean isUrl = text.startsWith("http://") || text.startsWith("https://");
                     String endpoint = isUrl ? "/api/open_url" : "/api/clipboard";
-                    String urlStr = activeDevice.getBaseUrl() + endpoint;
+                    String urlStr = getTrackpadBaseUrl() + endpoint;
                     HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
                     NetworkUtils.applyTunnelHeaders(conn);
                     conn.setRequestMethod("POST");
@@ -639,7 +645,7 @@ public class TrackpadActivity extends Activity implements SensorEventListener {
                     // HTTP fallback if UDP could not be used
                     if (!sentViaUdp && activeDevice != null) {
                         try {
-                            String urlStr = activeDevice.getBaseUrl() + "/api/mouse";
+                            String urlStr = getTrackpadBaseUrl() + "/api/mouse";
                             HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
                             NetworkUtils.applyTunnelHeaders(conn);
                             conn.setRequestMethod("POST");

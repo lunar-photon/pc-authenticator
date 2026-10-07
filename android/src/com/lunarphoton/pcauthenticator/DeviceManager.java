@@ -66,6 +66,10 @@ public class DeviceManager {
                 SharedPreferences prefs = context.getSharedPreferences("pc_auth_prefs", Context.MODE_PRIVATE);
                 String saved = prefs.getString(PREF_LAST_ACTIVE_URL, null);
                 if (saved != null && !saved.isEmpty()) {
+                    // If device is actively on Wi-Fi, do not let a saved tunnel URL block local Wi-Fi route
+                    if (isWifiActive(context) && saved.startsWith("https://")) {
+                        return null;
+                    }
                     activeUrlOverride = saved;
                     return saved;
                 }
@@ -79,6 +83,13 @@ public class DeviceManager {
     }
 
     public static boolean isInternetActive(Context context) {
+        if (context != null && isWifiActive(context)) {
+            // On Wi-Fi, only consider internet active if explicitly currently routed via https tunnel
+            if (activeUrlOverride != null && !activeUrlOverride.isEmpty()) {
+                return activeUrlOverride.startsWith("https://");
+            }
+            return false;
+        }
         String active = getActiveUrl(context);
         if (active != null && !active.isEmpty()) {
             return active.startsWith("https://");
@@ -172,18 +183,17 @@ public class DeviceManager {
             target = new PairedDevice(DEFAULT_DEVICE_ID, DEFAULT_HOSTNAME, DEFAULT_IP, DEFAULT_PORT, "lunarphoton", null, null, true);
         }
 
-        // Prioritize verified active route url if already established
+        boolean wifi = isWifiActive(context);
         String verifiedUrl = getActiveUrl(context);
         if (verifiedUrl != null && !verifiedUrl.isEmpty()) {
             target.activeUrl = verifiedUrl;
         } else {
-            boolean wifi = isWifiActive(context);
-            if (!wifi && target.internetUrl != null && !target.internetUrl.isEmpty()) {
+            if (wifi && target.localUrl != null && !target.localUrl.isEmpty()) {
+                target.activeUrl = target.localUrl;
+            } else if (!wifi && target.internetUrl != null && !target.internetUrl.isEmpty()) {
                 target.activeUrl = target.internetUrl;
-                setActiveUrl(context, target.internetUrl);
             } else if (target.localUrl != null && !target.localUrl.isEmpty()) {
                 target.activeUrl = target.localUrl;
-                setActiveUrl(context, target.localUrl);
             }
         }
 
@@ -233,6 +243,15 @@ public class DeviceManager {
             }
             if (newDevice.localUrl != null && !newDevice.localUrl.isEmpty()) {
                 matched.localUrl = newDevice.localUrl;
+                try {
+                    java.net.URI u = new java.net.URI(newDevice.localUrl);
+                    if (u.getHost() != null && !u.getHost().isEmpty()) {
+                        matched.ip = u.getHost();
+                    }
+                    if (u.getPort() > 0) {
+                        matched.port = u.getPort();
+                    }
+                } catch (Exception ignored) {}
             }
             if (newDevice.internetUrl != null && !newDevice.internetUrl.isEmpty()) {
                 matched.internetUrl = newDevice.internetUrl;

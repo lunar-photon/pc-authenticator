@@ -151,9 +151,9 @@ public class MainActivity extends Activity {
             } else if (AuthService.ACTION_STATUS.equals(action)) {
                 boolean connected = intent.getBooleanExtra("connected", false);
                 String statusText = intent.getStringExtra("status_text");
-                boolean isInternet = intent.getBooleanExtra("is_internet", false)
-                        || (statusText != null && statusText.contains("Internet"))
-                        || DeviceManager.isInternetActive(MainActivity.this);
+                boolean isInternet = intent.hasExtra("is_internet") ?
+                        intent.getBooleanExtra("is_internet", false) :
+                        ((statusText != null && statusText.contains("Internet")) || DeviceManager.isInternetActive(MainActivity.this));
                 updateConnectionStatus(connected, statusText, isInternet);
             } else if ("com.lunarphoton.pcauthenticator.CHALLENGE_RESOLVED".equals(action)) {
                 hideChallenge();
@@ -812,21 +812,45 @@ public class MainActivity extends Activity {
 
         new Thread(() -> {
             long start = System.currentTimeMillis();
-            String url = active.getBaseUrl();
-            String res = NetworkUtils.httpGet(url + "/api/info", 3000);
+            boolean wifi = DeviceManager.isWifiActive(MainActivity.this);
+            String localUrl = active.getLocalUrl();
+            String internetUrl = active.getInternetUrl();
+
+            String url = null;
+            String res = null;
             boolean isInternet = false;
 
-            if (res == null && active.getInternetUrl() != null && !url.equals(active.getInternetUrl())) {
-                url = active.getInternetUrl();
+            // If on Wi-Fi, ALWAYS try direct local URL first!
+            if (wifi && localUrl != null && !localUrl.isEmpty()) {
+                url = localUrl;
+                start = System.currentTimeMillis();
+                res = NetworkUtils.httpGet(url + "/api/info", 2500);
+                if (res != null) {
+                    isInternet = false;
+                    DeviceManager.setActiveUrl(MainActivity.this, url);
+                }
+            }
+
+            // Fallback to internet tunnel if local failed or not on Wi-Fi
+            if (res == null && internetUrl != null && !internetUrl.isEmpty()) {
+                url = internetUrl;
                 start = System.currentTimeMillis();
                 res = NetworkUtils.httpGet(url + "/api/info", 4500);
                 if (res != null) {
                     isInternet = true;
                     DeviceManager.setActiveUrl(MainActivity.this, url);
                 }
-            } else if (res != null) {
-                DeviceManager.setActiveUrl(MainActivity.this, url);
-                isInternet = url.startsWith("https://");
+            }
+
+            // If still null, try getBaseUrl() as final fallback
+            if (res == null) {
+                url = active.getBaseUrl();
+                start = System.currentTimeMillis();
+                res = NetworkUtils.httpGet(url + "/api/info", 3000);
+                if (res != null) {
+                    isInternet = url.startsWith("https://");
+                    DeviceManager.setActiveUrl(MainActivity.this, url);
+                }
             }
             long latency = System.currentTimeMillis() - start;
 
@@ -841,10 +865,17 @@ public class MainActivity extends Activity {
                         String host = json.optString("hostname", active.hostname);
                         String devId = json.optString("device_id", null);
                         if (devId != null) active.deviceId = devId;
-                        String localUrl = json.optString("local_url", null);
-                        String internetUrl = json.optString("internet_url", null);
-                        if (localUrl != null) active.localUrl = localUrl;
-                        if (internetUrl != null) active.internetUrl = internetUrl;
+                        String returnedLocalUrl = json.optString("local_url", null);
+                        String returnedInternetUrl = json.optString("internet_url", null);
+                        if (returnedLocalUrl != null) {
+                            active.localUrl = returnedLocalUrl;
+                            try {
+                                java.net.URI u = new java.net.URI(returnedLocalUrl);
+                                if (u.getHost() != null && !u.getHost().isEmpty()) active.ip = u.getHost();
+                                if (u.getPort() > 0) active.port = u.getPort();
+                            } catch (Exception ignored) {}
+                        }
+                        if (returnedInternetUrl != null) active.internetUrl = returnedInternetUrl;
                         DeviceManager.addOrUpdateDevice(MainActivity.this, active);
 
                         tvHostname.setText(host);
@@ -997,9 +1028,9 @@ public class MainActivity extends Activity {
             }
         }
 
-        // LAN features container vs notice banner
+        // Keep LAN features container accessible; show notice banner when on remote internet
         if (layoutLanFeatures != null) {
-            layoutLanFeatures.setVisibility(isInternet ? View.GONE : View.VISIBLE);
+            layoutLanFeatures.setVisibility(View.VISIBLE);
         }
         if (layoutLanNotice != null) {
             layoutLanNotice.setVisibility(isInternet ? View.VISIBLE : View.GONE);
@@ -1356,20 +1387,12 @@ public class MainActivity extends Activity {
         if (btnRingPc != null) btnRingPc.setOnClickListener(v -> ringPc());
         if (btnRemoteTrackpad != null) {
             btnRemoteTrackpad.setOnClickListener(v -> {
-                if (DeviceManager.isInternetActive(MainActivity.this)) {
-                    Toast.makeText(MainActivity.this, "🖱️ Trackpad & Laser is only available on local Wi-Fi", Toast.LENGTH_SHORT).show();
-                    return;
-                }
                 Intent intent = new Intent(MainActivity.this, TrackpadActivity.class);
                 startActivity(intent);
             });
         }
         if (btnCameraView != null) {
             btnCameraView.setOnClickListener(v -> {
-                if (DeviceManager.isInternetActive(MainActivity.this)) {
-                    Toast.makeText(MainActivity.this, "📹 PC Camera streaming is only available on local Wi-Fi", Toast.LENGTH_SHORT).show();
-                    return;
-                }
                 Intent intent = new Intent(MainActivity.this, CameraActivity.class);
                 startActivity(intent);
             });
@@ -1924,6 +1947,11 @@ public class MainActivity extends Activity {
                     boolean updated = false;
                     if (localUrl != null && !localUrl.equals(active.localUrl)) {
                         active.localUrl = localUrl;
+                        try {
+                            java.net.URI u = new java.net.URI(localUrl);
+                            if (u.getHost() != null && !u.getHost().isEmpty()) active.ip = u.getHost();
+                            if (u.getPort() > 0) active.port = u.getPort();
+                        } catch (Exception ignored) {}
                         updated = true;
                     }
                     if (internetUrl != null && !internetUrl.equals(active.internetUrl)) {
@@ -2034,7 +2062,9 @@ public class MainActivity extends Activity {
             new Thread(() -> {
                 try {
                     PairedDevice active = DeviceManager.getActiveDevice(this);
-                    String url = active.getBaseUrl() + "/api/screen/screenshot";
+                    String baseUrl = (DeviceManager.isWifiActive(this) && active.getLocalUrl() != null && !active.getLocalUrl().isEmpty())
+                            ? active.getLocalUrl() : active.getBaseUrl();
+                    String url = baseUrl + "/api/screen/screenshot";
                     HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
                     NetworkUtils.applyTunnelHeaders(conn);
                     conn.setRequestMethod("GET");

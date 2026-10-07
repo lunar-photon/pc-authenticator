@@ -66,9 +66,7 @@ public class CameraActivity extends Activity {
 
         activeDevice = DeviceManager.getActiveDevice(this);
         if (DeviceManager.isInternetActive(this)) {
-            Toast.makeText(this, "📹 PC Camera streaming is only available on local Wi-Fi", Toast.LENGTH_LONG).show();
-            finish();
-            return;
+            Toast.makeText(this, "📹 Streaming via Internet Tunnel", Toast.LENGTH_SHORT).show();
         }
         vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
 
@@ -120,11 +118,19 @@ public class CameraActivity extends Activity {
         startStream();
     }
 
+    private String getCameraBaseUrl() {
+        if (activeDevice == null) return "";
+        if (DeviceManager.isWifiActive(this) && activeDevice.getLocalUrl() != null && !activeDevice.getLocalUrl().isEmpty()) {
+            return activeDevice.getLocalUrl();
+        }
+        return activeDevice.getBaseUrl();
+    }
+
     private void fetchAvailableDevices() {
         if (activeDevice == null) return;
         new Thread(() -> {
             try {
-                String urlStr = activeDevice.getBaseUrl() + "/api/camera/devices";
+                String urlStr = getCameraBaseUrl() + "/api/camera/devices";
                 String resp = NetworkUtils.httpGetWithAuth(urlStr, activeDevice.authToken, 4000);
                 if (resp != null) {
                     JSONObject json = new JSONObject(resp);
@@ -185,7 +191,7 @@ public class CameraActivity extends Activity {
             InputStream in = null;
             try {
                 String devParam = currentDevice.isEmpty() ? "" : "&device=" + Uri.encode(currentDevice);
-                String urlStr = activeDevice.getBaseUrl() + "/api/camera/stream?quality=" + currentQuality + devParam;
+                String urlStr = getCameraBaseUrl() + "/api/camera/stream?quality=" + currentQuality + devParam;
                 conn = (HttpURLConnection) new URL(urlStr).openConnection();
                 NetworkUtils.applyTunnelHeaders(conn);
                 conn.setRequestMethod("GET");
@@ -291,7 +297,7 @@ public class CameraActivity extends Activity {
         new Thread(() -> {
             try {
                 String devParam = currentDevice.isEmpty() ? "" : "?device=" + Uri.encode(currentDevice);
-                String urlStr = activeDevice.getBaseUrl() + "/api/camera/snapshot" + devParam;
+                String urlStr = getCameraBaseUrl() + "/api/camera/snapshot" + devParam;
                 HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
                 NetworkUtils.applyTunnelHeaders(conn);
                 conn.setRequestMethod("GET");

@@ -458,11 +458,38 @@ def get_pc_system_status():
         "internet_url": tunnel_mgr.get_url() if 'tunnel_mgr' in globals() else None
     }
 
+def get_display_env():
+    env = os.environ.copy()
+    runtime_dir = env.get('XDG_RUNTIME_DIR') or f"/run/user/{os.getuid()}"
+    env['XDG_RUNTIME_DIR'] = runtime_dir
+    if not env.get('WAYLAND_DISPLAY'):
+        try:
+            for entry in os.listdir(runtime_dir):
+                if entry.startswith('wayland-') and not entry.endswith('.lock'):
+                    env['WAYLAND_DISPLAY'] = entry
+                    break
+        except Exception:
+            pass
+        if not env.get('WAYLAND_DISPLAY') and os.path.exists(os.path.join(runtime_dir, 'wayland-0')):
+            env['WAYLAND_DISPLAY'] = 'wayland-0'
+    if not env.get('DISPLAY'):
+        env['DISPLAY'] = ':0'
+    if env.get('WAYLAND_DISPLAY'):
+        env['QT_QPA_PLATFORM'] = 'wayland'
+    env.setdefault('XDG_CURRENT_DESKTOP', 'KDE')
+    if not env.get('DBUS_SESSION_BUS_ADDRESS'):
+        dbus_path = os.path.join(runtime_dir, 'bus')
+        if os.path.exists(dbus_path):
+            env['DBUS_SESSION_BUS_ADDRESS'] = f'unix:path={dbus_path}'
+    return env
+
 def capture_pc_screenshot():
     tmp_out = f"/tmp/pc_screen_{secrets.token_hex(4)}.jpg"
     try:
+        env = get_display_env()
         res = subprocess.run(
             ['spectacle', '-b', '-n', '-o', tmp_out],
+            env=env,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5
         )
         if res.returncode == 0 and os.path.exists(tmp_out):
