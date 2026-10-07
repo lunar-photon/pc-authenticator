@@ -180,9 +180,12 @@ public class MainActivity extends Activity {
     private String activeTerminalId = null;
     private String activeTerminalTitle = "";
     private String activeTerminalCwd = "";
-    private int currentTerminalLinesToFetch = 35;
+    private int currentTerminalLinesToFetch = 30;
     private boolean hasMoreTerminalHistory = false;
     private boolean isLoadingEarlier = false;
+    private String lastLoadedTerminalText = "";
+    private int preserveDistanceFromBottom = -1;
+    private boolean isFirstTerminalLoad = true;
     private Handler terminalHandler = new Handler(Looper.getMainLooper());
     private Runnable terminalPollRunnable = null;
 
@@ -3451,14 +3454,6 @@ public class MainActivity extends Activity {
             btnTermLoadEarlier.setOnClickListener(v -> loadEarlierTerminalHistory());
         }
 
-        if (scrollTermScreen != null) {
-            scrollTermScreen.getViewTreeObserver().addOnScrollChangedListener(() -> {
-                if (scrollTermScreen.getScrollY() <= 15 && hasMoreTerminalHistory && !isLoadingEarlier) {
-                    loadEarlierTerminalHistory();
-                }
-            });
-        }
-
         btnKeyCtrlC = findViewById(R.id.btn_key_ctrl_c);
         btnKeyTab = findViewById(R.id.btn_key_tab);
         btnKeyUp = findViewById(R.id.btn_key_up);
@@ -3649,9 +3644,12 @@ public class MainActivity extends Activity {
         activeTerminalId = termId;
         activeTerminalTitle = title;
         activeTerminalCwd = cwd;
-        currentTerminalLinesToFetch = 35;
+        currentTerminalLinesToFetch = 30;
         hasMoreTerminalHistory = false;
         isLoadingEarlier = false;
+        lastLoadedTerminalText = "";
+        preserveDistanceFromBottom = -1;
+        isFirstTerminalLoad = true;
 
         if (btnTermLoadEarlier != null) btnTermLoadEarlier.setVisibility(View.GONE);
         if (scrollTermList != null) scrollTermList.setVisibility(View.GONE);
@@ -3671,7 +3669,12 @@ public class MainActivity extends Activity {
     private void loadEarlierTerminalHistory() {
         if (!hasMoreTerminalHistory || isLoadingEarlier) return;
         isLoadingEarlier = true;
-        currentTerminalLinesToFetch += 45;
+        if (tvTermScreen != null && scrollTermScreen != null) {
+            preserveDistanceFromBottom = Math.max(0, tvTermScreen.getHeight() - scrollTermScreen.getScrollY());
+        } else {
+            preserveDistanceFromBottom = -1;
+        }
+        currentTerminalLinesToFetch += 40;
         if (btnTermLoadEarlier != null) btnTermLoadEarlier.setText("⏳ Loading earlier history...");
         pollActiveTerminalOutput();
     }
@@ -3679,6 +3682,9 @@ public class MainActivity extends Activity {
     private void closeTerminalInteractive() {
         stopTerminalStreamTimer();
         activeTerminalId = null;
+        lastLoadedTerminalText = "";
+        preserveDistanceFromBottom = -1;
+        isFirstTerminalLoad = true;
         if (layoutTerminalInteractive != null) layoutTerminalInteractive.setVisibility(View.GONE);
         if (scrollTermList != null) scrollTermList.setVisibility(View.VISIBLE);
         loadTerminalsList();
@@ -3737,17 +3743,35 @@ public class MainActivity extends Activity {
                                 }
                             }
 
+                            boolean textChanged = !text.equals(lastLoadedTerminalText);
+                            if (!textChanged && preserveDistanceFromBottom < 0 && !isFirstTerminalLoad) {
+                                return;
+                            }
+                            lastLoadedTerminalText = text;
+
                             if (tvTermScreen != null) {
                                 tvTermScreen.setText(text.isEmpty() ? "(Empty terminal)" : text);
                             }
 
-                            if (scrollTermScreen != null) {
-                                int scrollY = scrollTermScreen.getScrollY();
-                                int bottom = tvTermScreen != null ? tvTermScreen.getBottom() : 0;
-                                int height = scrollTermScreen.getHeight();
-                                if (bottom - (scrollY + height) < 180 || currentTerminalLinesToFetch <= 35) {
-                                    scrollTermScreen.post(() -> scrollTermScreen.fullScroll(View.FOCUS_DOWN));
-                                }
+                            if (scrollTermScreen != null && tvTermScreen != null) {
+                                scrollTermScreen.post(() -> {
+                                    if (isFirstTerminalLoad) {
+                                        isFirstTerminalLoad = false;
+                                        scrollTermScreen.fullScroll(View.FOCUS_DOWN);
+                                    } else if (preserveDistanceFromBottom >= 0) {
+                                        int newTotalHeight = tvTermScreen.getHeight();
+                                        int targetScrollY = Math.max(0, newTotalHeight - preserveDistanceFromBottom);
+                                        preserveDistanceFromBottom = -1;
+                                        scrollTermScreen.scrollTo(0, targetScrollY);
+                                    } else {
+                                        int scrollY = scrollTermScreen.getScrollY();
+                                        int bottom = tvTermScreen.getBottom();
+                                        int height = scrollTermScreen.getHeight();
+                                        if (bottom - (scrollY + height) < 200) {
+                                            scrollTermScreen.fullScroll(View.FOCUS_DOWN);
+                                        }
+                                    }
+                                });
                             }
                         });
                     }
