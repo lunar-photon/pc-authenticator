@@ -10,6 +10,9 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.media.MediaScannerConnection;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
@@ -210,6 +213,8 @@ public class FileServer {
                 handleFileDelete(queryParams.get("path"), rawOut);
             } else if (method.equals("POST") && path.equals("/api/files/mkdir")) {
                 handleFileMkdir(queryParams.get("path"), queryParams.get("name"), rawOut);
+            } else if (method.equals("GET") && (path.equals("/api/logs") || path.equals("/api/logcat"))) {
+                handleLogs(rawOut);
             } else {
                 sendError(rawOut, 404, "Not Found");
             }
@@ -219,6 +224,45 @@ public class FileServer {
         } finally {
             try { socket.close(); } catch (Exception ignored) {}
         }
+    }
+
+    private void handleLogs(OutputStream out) throws Exception {
+        JSONObject res = new JSONObject();
+        res.put("status", "ok");
+        res.put("captive_last_status", CaptivePortalManager.getLastStatus(context));
+        res.put("captive_enabled", CaptivePortalManager.isEnabled(context));
+        res.put("captive_gateway", CaptivePortalManager.getGatewayUrl(context));
+        res.put("captive_user", CaptivePortalManager.getUsername(context));
+
+        JSONArray history = new JSONArray();
+        for (String line : CaptivePortalManager.getDebugLogs(context)) {
+            history.put(line);
+        }
+        res.put("captive_debug_logs", history);
+
+        Network wifiNet = DeviceManager.getWifiNetwork(context);
+        res.put("wifi_connected", wifiNet != null);
+        if (wifiNet != null) {
+            ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm != null) {
+                NetworkCapabilities caps = cm.getNetworkCapabilities(wifiNet);
+                res.put("wifi_capabilities", caps != null ? caps.toString() : "null");
+            }
+        }
+
+        try {
+            Process process = Runtime.getRuntime().exec(new String[]{"logcat", "-d", "-t", "400", "-v", "time"});
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), "UTF-8"));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line).append("\n");
+            }
+            res.put("logcat", sb.toString());
+        } catch (Exception e) {
+            res.put("logcat_error", e.getMessage());
+        }
+        sendJson(out, res);
     }
 
     private void handleFileList(String targetPath, OutputStream out) throws Exception {

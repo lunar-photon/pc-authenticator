@@ -147,22 +147,31 @@ public class DeviceManager {
         prefs.edit().putString(PREF_DEVICES, arr.toString()).apply();
     }
 
-    public static boolean isWifiActive(Context context) {
-        if (context == null) return false;
+    public static Network getWifiNetwork(Context context) {
+        if (context == null) return null;
         try {
             ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
             if (cm != null) {
                 Network activeNet = cm.getActiveNetwork();
                 if (activeNet != null) {
                     NetworkCapabilities caps = cm.getNetworkCapabilities(activeNet);
-                    if (caps != null) {
-                        return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
-                               caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET);
+                    if (caps != null && (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))) {
+                        return activeNet;
+                    }
+                }
+                for (Network net : cm.getAllNetworks()) {
+                    NetworkCapabilities caps = cm.getNetworkCapabilities(net);
+                    if (caps != null && (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))) {
+                        return net;
                     }
                 }
             }
         } catch (Exception ignored) {}
-        return false;
+        return null;
+    }
+
+    public static boolean isWifiActive(Context context) {
+        return getWifiNetwork(context) != null;
     }
 
     public static PairedDevice getActiveDevice(Context context) {

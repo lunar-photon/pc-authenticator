@@ -142,7 +142,7 @@ public class AuthService extends Service {
                             if (DeviceManager.isWifiActive(context)) {
                                 lastScreenCheckTime = now;
                                 new Thread(() -> {
-                                    if (CaptivePortalManager.isInternetConnected()) {
+                                    if (CaptivePortalManager.isInternetConnected(context)) {
                                         return;
                                     }
                                     Log.i(TAG, "Screen woke & Wi-Fi internet blocked. Attempting captive portal login...");

@@ -2,6 +2,7 @@ package com.lunarphoton.pcauthenticator;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.net.Network;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -12,8 +13,11 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.net.UnknownHostException;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -128,11 +132,25 @@ public class CaptivePortalManager {
         return st + " (" + (agoSec / 60) + "m ago)";
     }
 
+    private static final List<String> memoryLogs = new ArrayList<>();
+
+    public static synchronized void logDebug(Context context, String entry) {
+        String ts = new java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(new java.util.Date());
+        String line = "[" + ts + "] " + entry;
+        Log.i(TAG, line);
+        memoryLogs.add(line);
+        if (memoryLogs.size() > 60) memoryLogs.remove(0);
+    }
+
+    public static synchronized List<String> getDebugLogs(Context context) {
+        return new ArrayList<>(memoryLogs);
+    }
+
     public static LoginResult login(Context context) {
         String url = getGatewayUrl(context);
         String user = getUsername(context);
         String pass = getPassword(context);
-        LoginResult res = login(url, user, pass);
+        LoginResult res = login(context, url, user, pass);
         if (context != null) {
             SharedPreferences prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
             prefs.edit()
@@ -154,9 +172,17 @@ public class CaptivePortalManager {
     }
 
     public static LoginResult login(String gatewayUrl, String username, String password) {
+        return login(null, gatewayUrl, username, password, true);
+    }
+
+    public static LoginResult login(Context context, String gatewayUrl, String username, String password) {
+        return login(context, gatewayUrl, username, password, true);
+    }
+
+    public static LoginResult login(Context context, String gatewayUrl, String username, String password, boolean allowFallback) {
         long start = System.currentTimeMillis();
         if (gatewayUrl == null || gatewayUrl.trim().isEmpty()) {
-            String detected = detectGatewayUrl();
+            String detected = detectGatewayUrl(context);
             gatewayUrl = (detected != null && !detected.isEmpty()) ? detected : DEFAULT_GATEWAY_URL;
         }
         if (username == null || username.trim().isEmpty()) {
@@ -165,6 +191,9 @@ public class CaptivePortalManager {
         if (password == null || password.isEmpty()) {
             return new LoginResult(false, "ERROR", "Password is required", 0);
         }
+
+        Network wifiNet = (context != null) ? DeviceManager.getWifiNetwork(context) : null;
+        logDebug(context, "Initiating portal login. Gateway=" + gatewayUrl + ", User=" + username + ", Wi-Fi interface bound=" + (wifiNet != null));
 
         HttpURLConnection conn = null;
         try {
@@ -179,7 +208,12 @@ public class CaptivePortalManager {
             sc.init(null, trustAll, new SecureRandom());
 
             URL u = new URL(gatewayUrl.trim());
-            conn = (HttpURLConnection) u.openConnection();
+            if (wifiNet != null) {
+                conn = (HttpURLConnection) wifiNet.openConnection(u);
+            } else {
+                conn = (HttpURLConnection) u.openConnection();
+            }
+
             if (conn instanceof HttpsURLConnection) {
                 HttpsURLConnection httpsConn = (HttpsURLConnection) conn;
                 httpsConn.setSSLSocketFactory(sc.getSocketFactory());
@@ -234,6 +268,8 @@ public class CaptivePortalManager {
             boolean isLive = "LIVE".equalsIgnoreCase(status) || "LOGIN".equalsIgnoreCase(status)
                     || resp.contains("signed in as") || resp.contains("LIVE");
 
+            logDebug(context, "Portal response: HTTP " + code + ", status=" + status + ", msg=" + message + ", isLive=" + isLive);
+
             if (isLive) {
                 if (message == null || message.isEmpty()) message = "You are signed in as " + username.trim();
                 return new LoginResult(true, status.isEmpty() ? "LIVE" : status, message, latency);
@@ -244,8 +280,18 @@ public class CaptivePortalManager {
                 return new LoginResult(false, "HTTP_" + code, "HTTP " + code + ((message != null && !message.isEmpty()) ? ": " + message : ""), latency);
             }
 
+        } catch (UnknownHostException uhe) {
+            logDebug(context, "UnknownHostException: " + uhe.getMessage());
+            if (allowFallback && gatewayUrl.contains("gateway.iisertvm.ac.in")) {
+                String fallbackUrl = gatewayUrl.replace("gateway.iisertvm.ac.in", "172.16.31.101");
+                logDebug(context, "DNS resolution failed; falling back to IP endpoint: " + fallbackUrl);
+                return login(context, fallbackUrl, username, password, false);
+            }
+            long latency = System.currentTimeMillis() - start;
+            return new LoginResult(false, "DNS_ERROR", "Cannot resolve gateway hostname (" + uhe.getMessage() + ")", latency);
         } catch (Exception e) {
             long latency = System.currentTimeMillis() - start;
+            logDebug(context, "Login error: " + e.getClass().getSimpleName() + ": " + e.getMessage());
             return new LoginResult(false, "ERROR", e.getMessage() != null ? e.getMessage() : e.toString(), latency);
         } finally {
             if (conn != null) {
@@ -305,6 +351,12 @@ public class CaptivePortalManager {
     }
 
     public static String detectGatewayUrl() {
+        return detectGatewayUrl(null);
+    }
+
+    public static String detectGatewayUrl(Context context) {
+        Network wifiNet = (context != null) ? DeviceManager.getWifiNetwork(context) : null;
+        logDebug(context, "Detecting gateway URL. Wi-Fi bound=" + (wifiNet != null));
         String[] probeUrls = new String[]{
                 "http://connectivitycheck.gstatic.com/generate_204",
                 "http://clients3.google.com/generate_204",
@@ -314,16 +366,22 @@ public class CaptivePortalManager {
             HttpURLConnection conn = null;
             try {
                 URL url = new URL(probeUrl);
-                conn = (HttpURLConnection) url.openConnection();
+                if (wifiNet != null) {
+                    conn = (HttpURLConnection) wifiNet.openConnection(url);
+                } else {
+                    conn = (HttpURLConnection) url.openConnection();
+                }
                 conn.setInstanceFollowRedirects(false);
                 conn.setConnectTimeout(3000);
                 conn.setReadTimeout(3000);
                 conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android; PCAuthenticator)");
                 int code = conn.getResponseCode();
+                logDebug(context, "Probe " + probeUrl + " -> HTTP " + code);
                 if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
                     String loc = conn.getHeaderField("Location");
                     if (loc != null && !loc.trim().isEmpty()) {
                         String normalized = normalizeGatewayUrl(loc.trim());
+                        logDebug(context, "Redirect location: " + loc + " -> " + normalized);
                         if (normalized != null) return normalized;
                     }
                 } else if (code == 200) {
@@ -336,17 +394,19 @@ public class CaptivePortalManager {
                         String html = sb.toString();
                         Matcher mXml = Pattern.compile("https?://[^\"'\\s<>]+/login\\.xml", Pattern.CASE_INSENSITIVE).matcher(html);
                         if (mXml.find()) {
+                            logDebug(context, "Found login.xml in HTML: " + mXml.group());
                             return mXml.group();
                         }
                         Matcher mLogin = Pattern.compile("https?://[^\"'\\s<>]+(?:login|portal|gateway)[^\"'\\s<>]*", Pattern.CASE_INSENSITIVE).matcher(html);
                         if (mLogin.find()) {
                             String found = normalizeGatewayUrl(mLogin.group());
+                            logDebug(context, "Found portal url in HTML: " + found);
                             if (found != null) return found;
                         }
                     }
                 }
             } catch (Exception e) {
-                Log.w(TAG, "Detection probe error on " + probeUrl + ": " + e.getMessage());
+                logDebug(context, "Detection probe error on " + probeUrl + ": " + e.getMessage());
             } finally {
                 if (conn != null) {
                     try { conn.disconnect(); } catch (Exception ignored) {}
@@ -374,10 +434,19 @@ public class CaptivePortalManager {
     }
 
     public static boolean isInternetConnected() {
+        return isInternetConnected(null);
+    }
+
+    public static boolean isInternetConnected(Context context) {
+        Network wifiNet = (context != null) ? DeviceManager.getWifiNetwork(context) : null;
         HttpURLConnection conn = null;
         try {
             URL url = new URL("http://connectivitycheck.gstatic.com/generate_204");
-            conn = (HttpURLConnection) url.openConnection();
+            if (wifiNet != null) {
+                conn = (HttpURLConnection) wifiNet.openConnection(url);
+            } else {
+                conn = (HttpURLConnection) url.openConnection();
+            }
             conn.setInstanceFollowRedirects(false);
             conn.setConnectTimeout(1800);
             conn.setReadTimeout(1800);

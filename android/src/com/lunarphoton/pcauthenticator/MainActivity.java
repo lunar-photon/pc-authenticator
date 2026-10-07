@@ -1346,7 +1346,7 @@ public class MainActivity extends Activity {
         btnAutoDetect.setOnClickListener(v -> {
             Toast.makeText(MainActivity.this, "Probing network for captive portal...", Toast.LENGTH_SHORT).show();
             new Thread(() -> {
-                String detected = CaptivePortalManager.detectGatewayUrl();
+                String detected = CaptivePortalManager.detectGatewayUrl(MainActivity.this);
                 runOnUiThread(() -> {
                     if (detected != null && !detected.isEmpty()) {
                         etGateway.setText(detected);
@@ -1418,7 +1418,7 @@ public class MainActivity extends Activity {
 
             Toast.makeText(this, "Testing portal login with " + user + "...", Toast.LENGTH_SHORT).show();
             new Thread(() -> {
-                CaptivePortalManager.LoginResult res = CaptivePortalManager.login(gateway, user, pass);
+                CaptivePortalManager.LoginResult res = CaptivePortalManager.login(MainActivity.this, gateway, user, pass);
                 runOnUiThread(() -> {
                     if (res.success) {
                         CaptivePortalManager.saveConfig(MainActivity.this, true, gateway, user, pass, auto, screenOn);
