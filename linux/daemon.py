@@ -467,6 +467,8 @@ def trigger_pc_captive_login(body=None):
         try:
             res = subprocess.run([script_path], capture_output=True, text=True, timeout=8)
             out = res.stdout.strip()
+            if '{username}' in out:
+                out = out.replace('{username}', 'chandra26')
             status = 'LIVE' if 'LIVE' in out or 'signed in' in out else 'OK'
             return {"status": "ok", "login_status": status, "output": out}
         except Exception as e:
@@ -508,6 +510,8 @@ def trigger_pc_captive_login(body=None):
         })
         with urllib.request.urlopen(req, context=ctx, timeout=8) as r:
             out = r.read().decode('utf-8', errors='ignore')
+            if '{username}' in out and username:
+                out = out.replace('{username}', username)
             status = 'LIVE' if 'LIVE' in out or 'signed in' in out else 'OK'
             return {"status": "ok", "login_status": status, "output": out}
     except Exception as e:

@@ -31,6 +31,7 @@ public class CaptivePortalManager {
     public static final String PREF_USERNAME = "captive_portal_username";
     public static final String PREF_PASSWORD = "captive_portal_password";
     public static final String PREF_AUTOLOGIN_WIFI = "captive_portal_autologin_wifi";
+    public static final String PREF_CHECK_SCREEN_ON = "captive_portal_check_screen_on";
     public static final String PREF_LAST_STATUS = "captive_portal_last_status";
     public static final String PREF_LAST_MSG = "captive_portal_last_msg";
     public static final String PREF_LAST_TIME = "captive_portal_last_time";
@@ -93,7 +94,13 @@ public class CaptivePortalManager {
         return prefs.getBoolean(PREF_AUTOLOGIN_WIFI, true);
     }
 
-    public static void saveConfig(Context context, boolean enabled, String gatewayUrl, String username, String password, boolean autoLogin) {
+    public static boolean isCheckOnScreenOn(Context context) {
+        if (context == null) return false;
+        SharedPreferences prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        return prefs.getBoolean(PREF_CHECK_SCREEN_ON, true);
+    }
+
+    public static void saveConfig(Context context, boolean enabled, String gatewayUrl, String username, String password, boolean autoLogin, boolean checkScreenOn) {
         if (context == null) return;
         SharedPreferences prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
         prefs.edit()
@@ -102,7 +109,12 @@ public class CaptivePortalManager {
                 .putString(PREF_USERNAME, username != null ? username.trim() : "")
                 .putString(PREF_PASSWORD, password != null ? password : "")
                 .putBoolean(PREF_AUTOLOGIN_WIFI, autoLogin)
+                .putBoolean(PREF_CHECK_SCREEN_ON, checkScreenOn)
                 .apply();
+    }
+
+    public static void saveConfig(Context context, boolean enabled, String gatewayUrl, String username, String password, boolean autoLogin) {
+        saveConfig(context, enabled, gatewayUrl, username, password, autoLogin, isCheckOnScreenOn(context));
     }
 
     public static String getLastStatus(Context context) {
@@ -144,7 +156,8 @@ public class CaptivePortalManager {
     public static LoginResult login(String gatewayUrl, String username, String password) {
         long start = System.currentTimeMillis();
         if (gatewayUrl == null || gatewayUrl.trim().isEmpty()) {
-            gatewayUrl = DEFAULT_GATEWAY_URL;
+            String detected = detectGatewayUrl();
+            gatewayUrl = (detected != null && !detected.isEmpty()) ? detected : DEFAULT_GATEWAY_URL;
         }
         if (username == null || username.trim().isEmpty()) {
             return new LoginResult(false, "ERROR", "LDAP Username is required", 0);
@@ -214,18 +227,21 @@ public class CaptivePortalManager {
 
             String status = extractTag(resp, "status");
             String message = extractTag(resp, "message");
+            if (message != null && message.contains("{username}")) {
+                message = message.replace("{username}", username.trim());
+            }
 
             boolean isLive = "LIVE".equalsIgnoreCase(status) || "LOGIN".equalsIgnoreCase(status)
                     || resp.contains("signed in as") || resp.contains("LIVE");
 
             if (isLive) {
-                if (message.isEmpty()) message = "You are signed in as " + username;
+                if (message == null || message.isEmpty()) message = "You are signed in as " + username.trim();
                 return new LoginResult(true, status.isEmpty() ? "LIVE" : status, message, latency);
             } else if (code == 200 && !resp.isEmpty()) {
-                String displayMsg = message.isEmpty() ? resp : message;
+                String displayMsg = (message != null && !message.isEmpty()) ? message : resp;
                 return new LoginResult(false, status.isEmpty() ? "FAILED" : status, displayMsg, latency);
             } else {
-                return new LoginResult(false, "HTTP_" + code, "HTTP " + code + (message.isEmpty() ? "" : ": " + message), latency);
+                return new LoginResult(false, "HTTP_" + code, "HTTP " + code + ((message != null && !message.isEmpty()) ? ": " + message : ""), latency);
             }
 
         } catch (Exception e) {
@@ -286,5 +302,93 @@ public class CaptivePortalManager {
             }
         } catch (Exception ignored) {}
         return "";
+    }
+
+    public static String detectGatewayUrl() {
+        String[] probeUrls = new String[]{
+                "http://connectivitycheck.gstatic.com/generate_204",
+                "http://clients3.google.com/generate_204",
+                "http://www.google.com/gen_204"
+        };
+        for (String probeUrl : probeUrls) {
+            HttpURLConnection conn = null;
+            try {
+                URL url = new URL(probeUrl);
+                conn = (HttpURLConnection) url.openConnection();
+                conn.setInstanceFollowRedirects(false);
+                conn.setConnectTimeout(3000);
+                conn.setReadTimeout(3000);
+                conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android; PCAuthenticator)");
+                int code = conn.getResponseCode();
+                if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
+                    String loc = conn.getHeaderField("Location");
+                    if (loc != null && !loc.trim().isEmpty()) {
+                        String normalized = normalizeGatewayUrl(loc.trim());
+                        if (normalized != null) return normalized;
+                    }
+                } else if (code == 200) {
+                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"))) {
+                        StringBuilder sb = new StringBuilder();
+                        String line;
+                        while ((line = reader.readLine()) != null && sb.length() < 12000) {
+                            sb.append(line).append("\n");
+                        }
+                        String html = sb.toString();
+                        Matcher mXml = Pattern.compile("https?://[^\"'\\s<>]+/login\\.xml", Pattern.CASE_INSENSITIVE).matcher(html);
+                        if (mXml.find()) {
+                            return mXml.group();
+                        }
+                        Matcher mLogin = Pattern.compile("https?://[^\"'\\s<>]+(?:login|portal|gateway)[^\"'\\s<>]*", Pattern.CASE_INSENSITIVE).matcher(html);
+                        if (mLogin.find()) {
+                            String found = normalizeGatewayUrl(mLogin.group());
+                            if (found != null) return found;
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Detection probe error on " + probeUrl + ": " + e.getMessage());
+            } finally {
+                if (conn != null) {
+                    try { conn.disconnect(); } catch (Exception ignored) {}
+                }
+            }
+        }
+        return null;
+    }
+
+    public static String normalizeGatewayUrl(String location) {
+        try {
+            URL u = new URL(location);
+            String protocol = u.getProtocol();
+            String host = u.getHost();
+            int port = u.getPort();
+            String portStr = (port > 0) ? (":" + port) : "";
+            String path = u.getPath();
+            if (path != null && path.endsWith("/login.xml")) {
+                return protocol + "://" + host + portStr + path;
+            }
+            return protocol + "://" + host + portStr + "/login.xml";
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    public static boolean isInternetConnected() {
+        HttpURLConnection conn = null;
+        try {
+            URL url = new URL("http://connectivitycheck.gstatic.com/generate_204");
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setInstanceFollowRedirects(false);
+            conn.setConnectTimeout(1800);
+            conn.setReadTimeout(1800);
+            int code = conn.getResponseCode();
+            return code == 204;
+        } catch (Exception e) {
+            return false;
+        } finally {
+            if (conn != null) {
+                try { conn.disconnect(); } catch (Exception ignored) {}
+            }
+        }
     }
 }

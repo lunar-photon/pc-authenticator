@@ -122,13 +122,42 @@ public class AuthService extends Service {
 
         IntentFilter unlockFilter = new IntentFilter();
         unlockFilter.addAction(Intent.ACTION_USER_PRESENT);
+        unlockFilter.addAction(Intent.ACTION_SCREEN_ON);
         registerReceiver(new BroadcastReceiver() {
+            private long lastScreenCheckTime = 0;
             @Override
             public void onReceive(Context context, Intent intent) {
-                if (Intent.ACTION_USER_PRESENT.equals(intent.getAction())) {
+                if (intent == null) return;
+                String action = intent.getAction();
+                if (Intent.ACTION_USER_PRESENT.equals(action)) {
                     if (RingManager.isRinging()) {
                         Log.i(TAG, "Device unlocked by user - stopping Find My Phone alarm");
                         RingManager.stopAlarm(context);
+                    }
+                }
+                if (Intent.ACTION_SCREEN_ON.equals(action) || Intent.ACTION_USER_PRESENT.equals(action)) {
+                    long now = System.currentTimeMillis();
+                    if (now - lastScreenCheckTime >= 90000L) {
+                        if (CaptivePortalManager.isEnabled(context) && CaptivePortalManager.isCheckOnScreenOn(context)) {
+                            if (DeviceManager.isWifiActive(context)) {
+                                lastScreenCheckTime = now;
+                                new Thread(() -> {
+                                    if (CaptivePortalManager.isInternetConnected()) {
+                                        return;
+                                    }
+                                    Log.i(TAG, "Screen woke & Wi-Fi internet blocked. Attempting captive portal login...");
+                                    CaptivePortalManager.LoginResult res = CaptivePortalManager.login(context);
+                                    if (res.success) {
+                                        Log.i(TAG, "Captive portal screen-on login succeeded: " + res.message);
+                                        new Handler(Looper.getMainLooper()).post(() -> {
+                                            Toast.makeText(context, "🌐 " + res.message, Toast.LENGTH_SHORT).show();
+                                        });
+                                    } else {
+                                        Log.w(TAG, "Captive portal screen-on login failed: " + res.message);
+                                    }
+                                }).start();
+                            }
+                        }
                     }
                 }
             }

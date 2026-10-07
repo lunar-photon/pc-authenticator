@@ -1338,6 +1338,27 @@ public class MainActivity extends Activity {
         etGateway.setTextSize(13);
         layout.addView(etGateway);
 
+        Button btnAutoDetect = new Button(this);
+        btnAutoDetect.setText("🔍 Auto-Detect Gateway URL");
+        btnAutoDetect.setTextSize(12);
+        btnAutoDetect.setTextColor(Color.parseColor("#38bdf8"));
+        btnAutoDetect.setBackgroundColor(Color.parseColor("#1e293b"));
+        btnAutoDetect.setOnClickListener(v -> {
+            Toast.makeText(MainActivity.this, "Probing network for captive portal...", Toast.LENGTH_SHORT).show();
+            new Thread(() -> {
+                String detected = CaptivePortalManager.detectGatewayUrl();
+                runOnUiThread(() -> {
+                    if (detected != null && !detected.isEmpty()) {
+                        etGateway.setText(detected);
+                        Toast.makeText(MainActivity.this, "✅ Detected: " + detected, Toast.LENGTH_SHORT).show();
+                    } else {
+                        Toast.makeText(MainActivity.this, "No captive portal redirect detected on current Wi-Fi", Toast.LENGTH_SHORT).show();
+                    }
+                });
+            }).start();
+        });
+        layout.addView(btnAutoDetect);
+
         TextView tvUserLabel = new TextView(this);
         tvUserLabel.setText("LDAP / Wi-Fi Username:");
         tvUserLabel.setTextColor(Color.parseColor("#38bdf8"));
@@ -1373,8 +1394,16 @@ public class MainActivity extends Activity {
         cbAutoLogin.setChecked(CaptivePortalManager.isAutoLoginOnWifi(this));
         cbAutoLogin.setTextColor(Color.parseColor("#e2e8f0"));
         cbAutoLogin.setTextSize(13);
-        cbAutoLogin.setPadding(0, 15, 0, 10);
+        cbAutoLogin.setPadding(0, 15, 0, 5);
         layout.addView(cbAutoLogin);
+
+        final CheckBox cbScreenOn = new CheckBox(this);
+        cbScreenOn.setText("Auto-reconnect when screen turns on");
+        cbScreenOn.setChecked(CaptivePortalManager.isCheckOnScreenOn(this));
+        cbScreenOn.setTextColor(Color.parseColor("#e2e8f0"));
+        cbScreenOn.setTextSize(13);
+        cbScreenOn.setPadding(0, 5, 0, 10);
+        layout.addView(cbScreenOn);
 
         ScrollView scroll = new ScrollView(this);
         scroll.addView(layout);
@@ -1385,13 +1414,14 @@ public class MainActivity extends Activity {
             String user = etUsername.getText().toString().trim();
             String pass = etPassword.getText().toString().trim();
             boolean auto = cbAutoLogin.isChecked();
+            boolean screenOn = cbScreenOn.isChecked();
 
             Toast.makeText(this, "Testing portal login with " + user + "...", Toast.LENGTH_SHORT).show();
             new Thread(() -> {
                 CaptivePortalManager.LoginResult res = CaptivePortalManager.login(gateway, user, pass);
                 runOnUiThread(() -> {
                     if (res.success) {
-                        CaptivePortalManager.saveConfig(MainActivity.this, true, gateway, user, pass, auto);
+                        CaptivePortalManager.saveConfig(MainActivity.this, true, gateway, user, pass, auto, screenOn);
                         updateCaptivePortalButton();
                         if (onUpdated != null) onUpdated.run();
                         Toast.makeText(MainActivity.this, "✅ Test successful! " + res.message, Toast.LENGTH_LONG).show();
@@ -1400,7 +1430,7 @@ public class MainActivity extends Activity {
                                 .setTitle("Portal Test Notice")
                                 .setMessage("Gateway returned: " + res.message + "\n\nSave credentials anyway?")
                                 .setPositiveButton("Save Anyway", (d2, w2) -> {
-                                    CaptivePortalManager.saveConfig(MainActivity.this, true, gateway, user, pass, auto);
+                                    CaptivePortalManager.saveConfig(MainActivity.this, true, gateway, user, pass, auto, screenOn);
                                     updateCaptivePortalButton();
                                     if (onUpdated != null) onUpdated.run();
                                     Toast.makeText(MainActivity.this, "Saved portal configuration", Toast.LENGTH_SHORT).show();
@@ -1417,7 +1447,8 @@ public class MainActivity extends Activity {
             String user = etUsername.getText().toString().trim();
             String pass = etPassword.getText().toString().trim();
             boolean auto = cbAutoLogin.isChecked();
-            CaptivePortalManager.saveConfig(MainActivity.this, true, gateway, user, pass, auto);
+            boolean screenOn = cbScreenOn.isChecked();
+            CaptivePortalManager.saveConfig(MainActivity.this, true, gateway, user, pass, auto, screenOn);
             updateCaptivePortalButton();
             if (onUpdated != null) onUpdated.run();
             Toast.makeText(MainActivity.this, "Saved portal configuration", Toast.LENGTH_SHORT).show();
