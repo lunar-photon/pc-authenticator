@@ -117,7 +117,11 @@ public class MainActivity extends Activity {
     private Button btnDenyChallenge;
 
     private Button btnSettings;
+    private View layoutCaptivePortal;
+    private TextView tvCaptiveStatusBadge;
+    private TextView tvCaptiveActionsLink;
     private Button btnCaptivePortalLogin;
+    private Button btnCaptivePortalLogout;
 
     private CancellationSignal cancellationSignal = null;
     private boolean isPromptShowing = false;
@@ -267,15 +271,22 @@ public class MainActivity extends Activity {
         if (btnSettings != null) {
             btnSettings.setOnClickListener(v -> showSettingsDialog());
         }
+        layoutCaptivePortal = findViewById(R.id.layout_captive_portal);
+        tvCaptiveStatusBadge = findViewById(R.id.tv_captive_status_badge);
+        tvCaptiveActionsLink = findViewById(R.id.tv_captive_actions_link);
         btnCaptivePortalLogin = findViewById(R.id.btn_captive_portal_login);
-        updateCaptivePortalButton();
+        btnCaptivePortalLogout = findViewById(R.id.btn_captive_portal_logout);
+
         if (btnCaptivePortalLogin != null) {
             btnCaptivePortalLogin.setOnClickListener(v -> handleCaptiveLoginClick());
-            btnCaptivePortalLogin.setOnLongClickListener(v -> {
-                showCaptivePortalActionsDialog();
-                return true;
-            });
         }
+        if (btnCaptivePortalLogout != null) {
+            btnCaptivePortalLogout.setOnClickListener(v -> handleCaptiveLogoutClick());
+        }
+        if (tvCaptiveActionsLink != null) {
+            tvCaptiveActionsLink.setOnClickListener(v -> showCaptivePortalActionsDialog());
+        }
+        updateCaptivePortalButton();
         updateApproveButtonText();
 
         // Listeners
@@ -1182,6 +1193,8 @@ public class MainActivity extends Activity {
         TextView tvCaptiveDesc = dialogView.findViewById(R.id.tv_dialog_captive_desc);
         View layoutCaptiveConfig = dialogView.findViewById(R.id.layout_dialog_captive_config);
         Button btnConfigCaptive = dialogView.findViewById(R.id.btn_dialog_config_captive);
+        Button btnLoginCaptive = dialogView.findViewById(R.id.btn_dialog_login_captive);
+        Button btnLogoutCaptive = dialogView.findViewById(R.id.btn_dialog_logout_captive);
 
         Runnable updateCaptiveDesc = () -> {
             boolean enabled = CaptivePortalManager.isEnabled(MainActivity.this);
@@ -1189,7 +1202,8 @@ public class MainActivity extends Activity {
             if (layoutCaptiveConfig != null) layoutCaptiveConfig.setVisibility(enabled ? View.VISIBLE : View.GONE);
             if (tvCaptiveDesc != null) {
                 String u = CaptivePortalManager.getUsername(MainActivity.this);
-                tvCaptiveDesc.setText(enabled ? ("Active (" + (u.isEmpty() ? "No user" : u) + ")") : "IISER TVM / Campus Portal");
+                String last = CaptivePortalManager.getLastStatus(MainActivity.this);
+                tvCaptiveDesc.setText(enabled ? ("Status: " + last + " (" + (u.isEmpty() ? "No user" : u) + ")") : "IISER TVM / Campus Portal");
             }
         };
         updateCaptiveDesc.run();
@@ -1205,6 +1219,12 @@ public class MainActivity extends Activity {
             });
         }
 
+        if (btnLoginCaptive != null) {
+            btnLoginCaptive.setOnClickListener(v -> handleCaptiveLoginClick());
+        }
+        if (btnLogoutCaptive != null) {
+            btnLogoutCaptive.setOnClickListener(v -> handleCaptiveLogoutClick());
+        }
         if (btnConfigCaptive != null) {
             btnConfigCaptive.setOnClickListener(v -> showCaptivePortalConfigDialog(updateCaptiveDesc));
         }
@@ -1214,18 +1234,48 @@ public class MainActivity extends Activity {
     }
 
     private void updateCaptivePortalButton() {
-        if (btnCaptivePortalLogin != null) {
-            boolean enabled = CaptivePortalManager.isEnabled(this);
-            btnCaptivePortalLogin.setVisibility(enabled ? View.VISIBLE : View.GONE);
-            if (enabled) {
-                String user = CaptivePortalManager.getUsername(this);
-                if (user != null && !user.isEmpty()) {
-                    btnCaptivePortalLogin.setText("🌐 Login to Internet (" + user + ")");
-                } else {
-                    btnCaptivePortalLogin.setText("🌐 Login to Internet (IISER TVM)");
-                }
+        boolean enabled = CaptivePortalManager.isEnabled(this);
+        if (layoutCaptivePortal != null) {
+            layoutCaptivePortal.setVisibility(enabled ? View.VISIBLE : View.GONE);
+        }
+        if (!enabled) return;
+
+        String user = CaptivePortalManager.getUsername(this);
+        String lastSt = CaptivePortalManager.getLastStatus(this);
+
+        if (tvCaptiveStatusBadge != null) {
+            if (user != null && !user.isEmpty()) {
+                tvCaptiveStatusBadge.setText("🌐 Campus: " + user + " (" + lastSt + ")");
+            } else {
+                tvCaptiveStatusBadge.setText("🌐 Campus Portal: Not configured");
             }
         }
+
+        if (btnCaptivePortalLogin != null) {
+            btnCaptivePortalLogin.setText("🌐 Login Now");
+        }
+
+        // Query real-time internet connectivity in background to display live status!
+        new Thread(() -> {
+            boolean live = CaptivePortalManager.isInternetConnected(MainActivity.this);
+            runOnUiThread(() -> {
+                if (tvCaptiveStatusBadge != null) {
+                    if (live) {
+                        tvCaptiveStatusBadge.setText("🟢 Internet LIVE (" + (user.isEmpty() ? "Connected" : user) + ")");
+                        tvCaptiveStatusBadge.setTextColor(Color.parseColor("#10b981"));
+                        if (btnCaptivePortalLogin != null) {
+                            btnCaptivePortalLogin.setText("🔄 Re-login");
+                        }
+                    } else {
+                        tvCaptiveStatusBadge.setText("🔴 Disconnected (" + (user.isEmpty() ? "No user" : user) + ")");
+                        tvCaptiveStatusBadge.setTextColor(Color.parseColor("#ef4444"));
+                        if (btnCaptivePortalLogin != null) {
+                            btnCaptivePortalLogin.setText("🌐 Login Now");
+                        }
+                    }
+                }
+            });
+        }).start();
     }
 
     private void handleCaptiveLoginClick() {
