@@ -173,6 +173,7 @@ public class MainActivity extends Activity {
     private Button btnKeyDown;
     private Button btnKeyCtrlD;
     private Button btnKeyClear;
+    private Button btnKeyCopy;
 
     private EditText etTermInput;
     private Button btnTermSend;
@@ -3460,6 +3461,7 @@ public class MainActivity extends Activity {
         btnKeyDown = findViewById(R.id.btn_key_down);
         btnKeyCtrlD = findViewById(R.id.btn_key_ctrl_d);
         btnKeyClear = findViewById(R.id.btn_key_clear);
+        btnKeyCopy = findViewById(R.id.btn_key_copy);
 
         etTermInput = findViewById(R.id.et_term_input);
         btnTermSend = findViewById(R.id.btn_term_send);
@@ -3485,6 +3487,15 @@ public class MainActivity extends Activity {
         if (btnKeyClear != null) {
             btnKeyClear.setOnClickListener(v -> {
                 if (tvTermScreen != null) tvTermScreen.setText("");
+            });
+        }
+        if (btnKeyCopy != null) {
+            btnKeyCopy.setOnClickListener(v -> copyTerminalTextToClipboard());
+        }
+        if (tvTermScreen != null) {
+            tvTermScreen.setOnLongClickListener(v -> {
+                copyTerminalTextToClipboard();
+                return true;
             });
         }
 
@@ -3661,6 +3672,7 @@ public class MainActivity extends Activity {
             tvInteractiveCwd.setText(cwd.isEmpty() ? "" : "📁 " + cwd);
         }
         if (tvTermScreen != null) tvTermScreen.setText("⚡ Connecting to " + title + "...");
+        if (scrollTermScreen != null) scrollTermScreen.scrollTo(0, 0);
 
         pollActiveTerminalOutput();
         startTerminalStreamTimer();
@@ -3749,29 +3761,43 @@ public class MainActivity extends Activity {
                             }
                             lastLoadedTerminalText = text;
 
-                            if (tvTermScreen != null) {
-                                tvTermScreen.setText(text.isEmpty() ? "(Empty terminal)" : text);
+                            final boolean firstLoad = isFirstTerminalLoad;
+                            final int savedPreserveDist = preserveDistanceFromBottom;
+                            preserveDistanceFromBottom = -1;
+
+                            // Check whether user was at the bottom before text change
+                            final boolean wasAtBottom;
+                            if (scrollTermScreen != null && tvTermScreen != null) {
+                                int scrollY = scrollTermScreen.getScrollY();
+                                int scrollHeight = scrollTermScreen.getHeight();
+                                int contentHeight = tvTermScreen.getHeight();
+                                wasAtBottom = (contentHeight <= scrollHeight) || ((contentHeight - (scrollY + scrollHeight)) < 140);
+                            } else {
+                                wasAtBottom = true;
                             }
 
-                            if (scrollTermScreen != null && tvTermScreen != null) {
-                                scrollTermScreen.post(() -> {
-                                    if (isFirstTerminalLoad) {
-                                        isFirstTerminalLoad = false;
-                                        scrollTermScreen.fullScroll(View.FOCUS_DOWN);
-                                    } else if (preserveDistanceFromBottom >= 0) {
-                                        int newTotalHeight = tvTermScreen.getHeight();
-                                        int targetScrollY = Math.max(0, newTotalHeight - preserveDistanceFromBottom);
-                                        preserveDistanceFromBottom = -1;
-                                        scrollTermScreen.scrollTo(0, targetScrollY);
-                                    } else {
-                                        int scrollY = scrollTermScreen.getScrollY();
-                                        int bottom = tvTermScreen.getBottom();
-                                        int height = scrollTermScreen.getHeight();
-                                        if (bottom - (scrollY + height) < 200) {
-                                            scrollTermScreen.fullScroll(View.FOCUS_DOWN);
-                                        }
+                            if (tvTermScreen != null) {
+                                final boolean[] layoutHandled = new boolean[]{false};
+                                View.OnLayoutChangeListener layoutListener = new View.OnLayoutChangeListener() {
+                                    @Override
+                                    public void onLayoutChange(View v, int left, int top, int right, int bottom,
+                                                               int oldLeft, int oldTop, int oldRight, int oldBottom) {
+                                        if (layoutHandled[0]) return;
+                                        layoutHandled[0] = true;
+                                        tvTermScreen.removeOnLayoutChangeListener(this);
+                                        applyTerminalScroll(bottom - top, firstLoad, savedPreserveDist, wasAtBottom);
                                     }
-                                });
+                                };
+                                tvTermScreen.addOnLayoutChangeListener(layoutListener);
+                                tvTermScreen.postDelayed(() -> {
+                                    if (!layoutHandled[0] && tvTermScreen != null) {
+                                        layoutHandled[0] = true;
+                                        tvTermScreen.removeOnLayoutChangeListener(layoutListener);
+                                        applyTerminalScroll(tvTermScreen.getHeight(), firstLoad, savedPreserveDist, wasAtBottom);
+                                    }
+                                }, 120);
+
+                                tvTermScreen.setText(text.isEmpty() ? "(Empty terminal)" : text);
                             }
                         });
                     }
@@ -3780,6 +3806,32 @@ public class MainActivity extends Activity {
                 isLoadingEarlier = false;
             }
         }).start();
+    }
+
+    private void applyTerminalScroll(int newContentHeight, boolean firstLoad, int savedPreserveDist, boolean wasAtBottom) {
+        if (scrollTermScreen == null) return;
+        if (firstLoad) {
+            isFirstTerminalLoad = false;
+            scrollTermScreen.post(() -> scrollTermScreen.fullScroll(View.FOCUS_DOWN));
+        } else if (savedPreserveDist >= 0) {
+            int targetScrollY = Math.max(0, newContentHeight - savedPreserveDist);
+            scrollTermScreen.post(() -> scrollTermScreen.scrollTo(0, targetScrollY));
+        } else if (wasAtBottom) {
+            scrollTermScreen.post(() -> scrollTermScreen.fullScroll(View.FOCUS_DOWN));
+        }
+    }
+
+    private void copyTerminalTextToClipboard() {
+        if (tvTermScreen == null) return;
+        CharSequence text = tvTermScreen.getText();
+        if (text != null && text.length() > 0) {
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null) {
+                ClipData clip = ClipData.newPlainText("Terminal Output", text.toString());
+                cm.setPrimaryClip(clip);
+                Toast.makeText(this, "📋 Terminal text copied to clipboard", Toast.LENGTH_SHORT).show();
+            }
+        }
     }
 
     private void handleSendTerminalInput() {

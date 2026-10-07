@@ -1134,6 +1134,7 @@
                     android:layout_weight="1"
                     android:background="#050B14"
                     android:fillViewport="true"
+                    android:descendantFocusability="blocksDescendants"
                     android:layout_marginBottom="6dp">
 
                     <TextView
@@ -1144,7 +1145,6 @@
                         android:typeface="monospace"
                         android:textSize="11sp"
                         android:textColor="#39FF14"
-                        android:textIsSelectable="true"
                         android:text="Connecting to terminal..." />
                 </ScrollView>
 
@@ -1217,6 +1217,19 @@
                             android:textSize="10sp"
                             android:textStyle="bold"
                             android:textColor="@color/text_white"
+                            android:background="@drawable/card_bg"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="8dp"
+                            android:layout_marginEnd="4dp" />
+
+                        <Button
+                            android:id="@+id/btn_key_copy"
+                            android:layout_width="wrap_content"
+                            android:layout_height="26dp"
+                            android:text="📋 Copy"
+                            android:textSize="10sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/accent_cyan"
                             android:background="@drawable/card_bg"
                             android:paddingStart="8dp"
                             android:paddingEnd="8dp"
