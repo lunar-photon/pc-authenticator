@@ -262,10 +262,18 @@ public class CaptivePortalManager {
             conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android; PCAuthenticator)");
 
             long timestamp = System.currentTimeMillis();
-            String postData = "mode=191&username=" + URLEncoder.encode(username.trim(), "UTF-8")
-                    + "&password=" + URLEncoder.encode(password, "UTF-8")
-                    + "&a=" + timestamp
-                    + "&producttype=0";
+            String postData;
+            if (gatewayUrl.contains("login.xml") || gatewayUrl.contains("iisertvm") || gatewayUrl.contains("172.16.31.101")) {
+                postData = "mode=191&username=" + URLEncoder.encode(username.trim(), "UTF-8")
+                        + "&password=" + URLEncoder.encode(password, "UTF-8")
+                        + "&a=" + timestamp
+                        + "&producttype=0";
+            } else {
+                postData = "username=" + URLEncoder.encode(username.trim(), "UTF-8")
+                        + "&password=" + URLEncoder.encode(password, "UTF-8")
+                        + "&user=" + URLEncoder.encode(username.trim(), "UTF-8")
+                        + "&pass=" + URLEncoder.encode(password, "UTF-8");
+            }
 
             byte[] postBytes = postData.getBytes("UTF-8");
             conn.setRequestProperty("Content-Length", String.valueOf(postBytes.length));
@@ -295,7 +303,8 @@ public class CaptivePortalManager {
             }
 
             boolean isLive = "LIVE".equalsIgnoreCase(status) || "LOGIN".equalsIgnoreCase(status)
-                    || resp.contains("signed in as") || resp.contains("LIVE");
+                    || resp.contains("signed in as") || resp.contains("LIVE") || resp.contains("success")
+                    || (code >= 200 && code < 400 && isInternetConnected(context));
 
             logDebug(context, "Portal response: HTTP " + code + ", status=" + status + ", msg=" + message + ", isLive=" + isLive);
 
@@ -313,7 +322,7 @@ public class CaptivePortalManager {
             logDebug(context, "UnknownHostException: " + uhe.getMessage());
             if (allowFallback && gatewayUrl.contains("gateway.iisertvm.ac.in")) {
                 String fallbackUrl = gatewayUrl.replace("gateway.iisertvm.ac.in", "172.16.31.101");
-                logDebug(context, "DNS resolution failed; falling back to IP endpoint: " + fallbackUrl);
+                logDebug(context, "DNS fallback to IP endpoint: " + fallbackUrl);
                 return loginInternal(context, wifiNet, fallbackUrl, username, password, false, start);
             }
             long latency = System.currentTimeMillis() - start;
@@ -356,7 +365,15 @@ public class CaptivePortalManager {
             return new LoginResult(false, "ERROR", "Username is required", 0);
         }
 
-        String logoutUrl = gatewayUrl.replace("login.xml", "logout.xml");
+        String logoutUrl;
+        if (gatewayUrl.contains("login.xml")) {
+            logoutUrl = gatewayUrl.replace("login.xml", "logout.xml");
+        } else if (gatewayUrl.contains("login")) {
+            logoutUrl = gatewayUrl.replace("login", "logout");
+        } else {
+            logoutUrl = gatewayUrl.endsWith("/") ? (gatewayUrl + "logout") : (gatewayUrl + "/logout");
+        }
+
         Network wifiNet = (context != null) ? DeviceManager.getWifiNetwork(context) : null;
         logDebug(context, "Initiating portal logout. Gateway=" + logoutUrl + ", User=" + username);
 
@@ -402,9 +419,15 @@ public class CaptivePortalManager {
             conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android; PCAuthenticator)");
 
             long timestamp = System.currentTimeMillis();
-            String postData = "mode=193&username=" + URLEncoder.encode(username.trim(), "UTF-8")
-                    + "&a=" + timestamp
-                    + "&producttype=0";
+            String postData;
+            if (logoutUrl.contains("logout.xml") || logoutUrl.contains("iisertvm") || logoutUrl.contains("172.16.31.101")) {
+                postData = "mode=193&username=" + URLEncoder.encode(username.trim(), "UTF-8")
+                        + "&a=" + timestamp
+                        + "&producttype=0";
+            } else {
+                postData = "logout=1&username=" + URLEncoder.encode(username.trim(), "UTF-8")
+                        + "&action=logout";
+            }
 
             byte[] postBytes = postData.getBytes("UTF-8");
             conn.setRequestProperty("Content-Length", String.valueOf(postBytes.length));
@@ -443,43 +466,6 @@ public class CaptivePortalManager {
             if (conn != null) {
                 try { conn.disconnect(); } catch (Exception ignored) {}
             }
-        }
-    }
-
-    public static LoginResult triggerPcLogin(Context context) {
-        long start = System.currentTimeMillis();
-        PairedDevice active = DeviceManager.getActiveDevice(context);
-        if (active == null) {
-            return new LoginResult(false, "ERROR", "No PC connected", 0);
-        }
-        try {
-            String baseUrl = (DeviceManager.isWifiActive(context) && active.getLocalUrl() != null && !active.getLocalUrl().isEmpty())
-                    ? active.getLocalUrl() : active.getBaseUrl();
-            String urlStr = baseUrl + "/api/network/captive_login";
-            URL u = new URL(urlStr);
-            HttpURLConnection conn = (HttpURLConnection) u.openConnection();
-            NetworkUtils.applyTunnelHeaders(conn);
-            conn.setRequestMethod("POST");
-            conn.setConnectTimeout(5000);
-            conn.setReadTimeout(9000);
-            if (active.isPaired()) {
-                conn.setRequestProperty("Authorization", "Bearer " + active.authToken);
-            }
-            conn.setRequestProperty("Content-Type", "application/json");
-            conn.setDoOutput(true);
-            try (OutputStream os = conn.getOutputStream()) {
-                os.write("{}".getBytes("UTF-8"));
-            }
-            int code = conn.getResponseCode();
-            long latency = System.currentTimeMillis() - start;
-            if (code == 200) {
-                return new LoginResult(true, "OK", "Laptop logged in to campus network!", latency);
-            } else {
-                return new LoginResult(false, "HTTP_" + code, "Laptop returned HTTP " + code, latency);
-            }
-        } catch (Exception e) {
-            long latency = System.currentTimeMillis() - start;
-            return new LoginResult(false, "ERROR", e.getMessage(), latency);
         }
     }
 
@@ -623,6 +609,7 @@ public class CaptivePortalManager {
     }
 
     public static String normalizeGatewayUrl(String location) {
+        if (location == null || location.trim().isEmpty()) return null;
         try {
             URL u = new URL(location);
             String protocol = u.getProtocol();
@@ -630,12 +617,15 @@ public class CaptivePortalManager {
             int port = u.getPort();
             String portStr = (port > 0) ? (":" + port) : "";
             String path = u.getPath();
-            if (path != null && path.endsWith("/login.xml")) {
-                return protocol + "://" + host + portStr + path;
+            if (path != null && (path.endsWith("/login.xml") || path.endsWith("/login") || path.contains("login") || path.contains("portal") || path.contains("auth"))) {
+                return location;
             }
-            return protocol + "://" + host + portStr + "/login.xml";
+            if (host.contains("iisertvm") || host.equals("172.16.31.101")) {
+                return protocol + "://" + host + portStr + "/login.xml";
+            }
+            return location;
         } catch (Exception e) {
-            return null;
+            return location;
         }
     }
 

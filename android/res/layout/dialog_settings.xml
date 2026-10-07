@@ -192,25 +192,14 @@
         android:visibility="gone">
 
         <Button
-            android:id="@+id/btn_dialog_login_captive"
+            android:id="@+id/btn_dialog_toggle_captive"
             android:layout_width="0dp"
             android:layout_height="36dp"
             android:layout_weight="1"
-            android:text="🌐 Login"
+            android:text="🌐 Login to Internet"
             android:textSize="12sp"
             android:textColor="@color/text_white"
             android:background="@drawable/btn_approve"
-            android:layout_marginEnd="6dp" />
-
-        <Button
-            android:id="@+id/btn_dialog_logout_captive"
-            android:layout_width="0dp"
-            android:layout_height="36dp"
-            android:layout_weight="1"
-            android:text="🚪 Logout"
-            android:textSize="12sp"
-            android:textColor="@color/text_white"
-            android:background="@drawable/btn_deny"
             android:layout_marginEnd="6dp" />
 
         <Button
