@@ -11,6 +11,8 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.InetAddress;
+import java.net.SocketException;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.net.UnknownHostException;
@@ -193,6 +195,10 @@ public class CaptivePortalManager {
         }
 
         Network wifiNet = (context != null) ? DeviceManager.getWifiNetwork(context) : null;
+        return loginInternal(context, wifiNet, gatewayUrl, username, password, allowFallback, start);
+    }
+
+    private static LoginResult loginInternal(Context context, Network wifiNet, String gatewayUrl, String username, String password, boolean allowFallback, long start) {
         logDebug(context, "Initiating portal login. Gateway=" + gatewayUrl + ", User=" + username + ", Wi-Fi interface bound=" + (wifiNet != null));
 
         HttpURLConnection conn = null;
@@ -208,8 +214,31 @@ public class CaptivePortalManager {
             sc.init(null, trustAll, new SecureRandom());
 
             URL u = new URL(gatewayUrl.trim());
+
+            // If hostname is gateway.iisertvm.ac.in, test DNS resolution on Wi-Fi interface first
+            if (wifiNet != null && u.getHost() != null && u.getHost().equalsIgnoreCase("gateway.iisertvm.ac.in")) {
+                try {
+                    InetAddress[] resolved = wifiNet.getAllByName(u.getHost());
+                    if (resolved == null || resolved.length == 0) {
+                        throw new UnknownHostException("Wi-Fi DNS returned empty result for " + u.getHost());
+                    }
+                } catch (Exception ex) {
+                    logDebug(context, "Wi-Fi DNS could not resolve " + u.getHost() + ": " + ex.getMessage());
+                    if (allowFallback) {
+                        String fallbackUrl = gatewayUrl.replace("gateway.iisertvm.ac.in", "172.16.31.101");
+                        logDebug(context, "DNS fallback to IP endpoint: " + fallbackUrl);
+                        return loginInternal(context, wifiNet, fallbackUrl, username, password, false, start);
+                    }
+                }
+            }
+
             if (wifiNet != null) {
-                conn = (HttpURLConnection) wifiNet.openConnection(u);
+                try {
+                    conn = (HttpURLConnection) wifiNet.openConnection(u);
+                } catch (Exception ex) {
+                    logDebug(context, "wifiNet.openConnection failed (" + ex.getMessage() + "), using default routing");
+                    conn = (HttpURLConnection) u.openConnection();
+                }
             } else {
                 conn = (HttpURLConnection) u.openConnection();
             }
@@ -285,13 +314,25 @@ public class CaptivePortalManager {
             if (allowFallback && gatewayUrl.contains("gateway.iisertvm.ac.in")) {
                 String fallbackUrl = gatewayUrl.replace("gateway.iisertvm.ac.in", "172.16.31.101");
                 logDebug(context, "DNS resolution failed; falling back to IP endpoint: " + fallbackUrl);
-                return login(context, fallbackUrl, username, password, false);
+                return loginInternal(context, wifiNet, fallbackUrl, username, password, false, start);
             }
             long latency = System.currentTimeMillis() - start;
             return new LoginResult(false, "DNS_ERROR", "Cannot resolve gateway hostname (" + uhe.getMessage() + ")", latency);
+        } catch (SocketException se) {
+            logDebug(context, "SocketException: " + se.getMessage());
+            if (wifiNet != null) {
+                logDebug(context, "Wi-Fi socket binding failed; retrying without interface binding...");
+                return loginInternal(context, null, gatewayUrl, username, password, allowFallback, start);
+            }
+            long latency = System.currentTimeMillis() - start;
+            return new LoginResult(false, "NET_ERROR", se.getMessage(), latency);
         } catch (Exception e) {
             long latency = System.currentTimeMillis() - start;
             logDebug(context, "Login error: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+            if (wifiNet != null && e.getMessage() != null && e.getMessage().contains("Binding socket")) {
+                logDebug(context, "Retrying without Wi-Fi binding after bind error...");
+                return loginInternal(context, null, gatewayUrl, username, password, allowFallback, start);
+            }
             return new LoginResult(false, "ERROR", e.getMessage() != null ? e.getMessage() : e.toString(), latency);
         } finally {
             if (conn != null) {
@@ -368,7 +409,11 @@ public class CaptivePortalManager {
             try {
                 URL url = new URL(probeUrl);
                 if (wifiNet != null) {
-                    conn = (HttpURLConnection) wifiNet.openConnection(url);
+                    try {
+                        conn = (HttpURLConnection) wifiNet.openConnection(url);
+                    } catch (Exception ex) {
+                        conn = (HttpURLConnection) url.openConnection();
+                    }
                 } else {
                     conn = (HttpURLConnection) url.openConnection();
                 }
@@ -419,39 +464,53 @@ public class CaptivePortalManager {
             }
         }
 
-        // If internet is already functioning (all probes returned 204), test if campus gateway is reachable
-        if (all204) {
-            String[] campusCandidates = new String[]{
-                    DEFAULT_GATEWAY_URL,
-                    "https://172.16.31.101:8090/login.xml"
-            };
-            for (String cand : campusCandidates) {
-                try {
-                    URL u = new URL(cand);
-                    HttpURLConnection c = (wifiNet != null) ? (HttpURLConnection) wifiNet.openConnection(u) : (HttpURLConnection) u.openConnection();
-                    if (c instanceof HttpsURLConnection) {
-                        HttpsURLConnection hc = (HttpsURLConnection) c;
-                        TrustManager[] trustAll = new TrustManager[]{
-                            new X509TrustManager() {
-                                public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
-                                public void checkClientTrusted(X509Certificate[] certs, String authType) {}
-                                public void checkServerTrusted(X509Certificate[] certs, String authType) {}
-                            }
-                        };
-                        SSLContext sc = SSLContext.getInstance("TLS");
-                        sc.init(null, trustAll, new SecureRandom());
-                        hc.setSSLSocketFactory(sc.getSocketFactory());
-                        hc.setHostnameVerifier((h, s) -> true);
+        // If no redirect was found from external probes (either because internet is already LIVE,
+        // or because external DNS cannot resolve gstatic.com while captive),
+        // probe local campus gateway endpoints directly:
+        String[] campusCandidates = new String[]{
+                DEFAULT_GATEWAY_URL,
+                "https://172.16.31.101:8090/login.xml"
+        };
+        for (String cand : campusCandidates) {
+            HttpURLConnection c = null;
+            try {
+                URL u = new URL(cand);
+                if (wifiNet != null) {
+                    try {
+                        c = (HttpURLConnection) wifiNet.openConnection(u);
+                    } catch (Exception ex) {
+                        c = (HttpURLConnection) u.openConnection();
                     }
-                    c.setRequestMethod("GET");
-                    c.setConnectTimeout(2500);
-                    c.setReadTimeout(2500);
-                    int rCode = c.getResponseCode();
-                    logDebug(context, "Campus gateway probe " + cand + " -> HTTP " + rCode);
-                    if (rCode > 0) {
-                        return cand;
-                    }
-                } catch (Exception ignored) {}
+                } else {
+                    c = (HttpURLConnection) u.openConnection();
+                }
+                if (c instanceof HttpsURLConnection) {
+                    HttpsURLConnection hc = (HttpsURLConnection) c;
+                    TrustManager[] trustAll = new TrustManager[]{
+                        new X509TrustManager() {
+                            public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
+                            public void checkClientTrusted(X509Certificate[] certs, String authType) {}
+                            public void checkServerTrusted(X509Certificate[] certs, String authType) {}
+                        }
+                    };
+                    SSLContext sc = SSLContext.getInstance("TLS");
+                    sc.init(null, trustAll, new SecureRandom());
+                    hc.setSSLSocketFactory(sc.getSocketFactory());
+                    hc.setHostnameVerifier((h, s) -> true);
+                }
+                c.setRequestMethod("GET");
+                c.setConnectTimeout(2500);
+                c.setReadTimeout(2500);
+                int rCode = c.getResponseCode();
+                logDebug(context, "Campus gateway probe " + cand + " -> HTTP " + rCode);
+                if (rCode > 0) {
+                    return cand;
+                }
+            } catch (Exception ignored) {
+            } finally {
+                if (c != null) {
+                    try { c.disconnect(); } catch (Exception ignored) {}
+                }
             }
         }
 
@@ -485,7 +544,11 @@ public class CaptivePortalManager {
         try {
             URL url = new URL("http://connectivitycheck.gstatic.com/generate_204");
             if (wifiNet != null) {
-                conn = (HttpURLConnection) wifiNet.openConnection(url);
+                try {
+                    conn = (HttpURLConnection) wifiNet.openConnection(url);
+                } catch (Exception ex) {
+                    conn = (HttpURLConnection) url.openConnection();
+                }
             } else {
                 conn = (HttpURLConnection) url.openConnection();
             }
