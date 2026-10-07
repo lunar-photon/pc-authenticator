@@ -189,6 +189,14 @@ public class AuthService extends Service {
                             Log.i(TAG, "Network route changed/available (Wi-Fi=" + wifi + "). Rapidly adapting active connection...");
                             DeviceManager.setActiveUrl(AuthService.this, null);
                             abortCurrentConnectionAndWake();
+
+                            if (wifi && CaptivePortalManager.isEnabled(AuthService.this)
+                                    && CaptivePortalManager.isAutoLoginOnWifi(AuthService.this)) {
+                                Log.i(TAG, "Triggering captive portal auto-login on Wi-Fi connection...");
+                                CaptivePortalManager.loginAsync(AuthService.this, res -> {
+                                    Log.i(TAG, "Captive portal auto-login result: " + res.status + " - " + res.message);
+                                });
+                            }
                         }
                     }
 

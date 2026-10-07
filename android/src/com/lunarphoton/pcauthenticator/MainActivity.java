@@ -34,6 +34,7 @@ import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -116,6 +117,7 @@ public class MainActivity extends Activity {
     private Button btnDenyChallenge;
 
     private Button btnSettings;
+    private Button btnCaptivePortalLogin;
 
     private CancellationSignal cancellationSignal = null;
     private boolean isPromptShowing = false;
@@ -264,6 +266,15 @@ public class MainActivity extends Activity {
         btnSettings = findViewById(R.id.btn_settings);
         if (btnSettings != null) {
             btnSettings.setOnClickListener(v -> showSettingsDialog());
+        }
+        btnCaptivePortalLogin = findViewById(R.id.btn_captive_portal_login);
+        updateCaptivePortalButton();
+        if (btnCaptivePortalLogin != null) {
+            btnCaptivePortalLogin.setOnClickListener(v -> handleCaptiveLoginClick());
+            btnCaptivePortalLogin.setOnLongClickListener(v -> {
+                showCaptivePortalActionsDialog();
+                return true;
+            });
         }
         updateApproveButtonText();
 
@@ -1167,7 +1178,252 @@ public class MainActivity extends Activity {
             btnChangePwd.setOnClickListener(v -> showChangePasswordDialog(updatePwdStatus));
         }
 
+        Switch switchCaptive = dialogView.findViewById(R.id.switch_dialog_captive);
+        TextView tvCaptiveDesc = dialogView.findViewById(R.id.tv_dialog_captive_desc);
+        View layoutCaptiveConfig = dialogView.findViewById(R.id.layout_dialog_captive_config);
+        Button btnConfigCaptive = dialogView.findViewById(R.id.btn_dialog_config_captive);
+
+        Runnable updateCaptiveDesc = () -> {
+            boolean enabled = CaptivePortalManager.isEnabled(MainActivity.this);
+            if (switchCaptive != null) switchCaptive.setChecked(enabled);
+            if (layoutCaptiveConfig != null) layoutCaptiveConfig.setVisibility(enabled ? View.VISIBLE : View.GONE);
+            if (tvCaptiveDesc != null) {
+                String u = CaptivePortalManager.getUsername(MainActivity.this);
+                tvCaptiveDesc.setText(enabled ? ("Active (" + (u.isEmpty() ? "No user" : u) + ")") : "IISER TVM / Campus Portal");
+            }
+        };
+        updateCaptiveDesc.run();
+
+        if (switchCaptive != null) {
+            switchCaptive.setOnCheckedChangeListener((btn, isChecked) -> {
+                CaptivePortalManager.setEnabled(MainActivity.this, isChecked);
+                updateCaptiveDesc.run();
+                updateCaptivePortalButton();
+                if (isChecked && (CaptivePortalManager.getUsername(MainActivity.this).isEmpty() || CaptivePortalManager.getPassword(MainActivity.this).isEmpty())) {
+                    showCaptivePortalConfigDialog(updateCaptiveDesc);
+                }
+            });
+        }
+
+        if (btnConfigCaptive != null) {
+            btnConfigCaptive.setOnClickListener(v -> showCaptivePortalConfigDialog(updateCaptiveDesc));
+        }
+
         builder.setPositiveButton("Done", null);
+        builder.show();
+    }
+
+    private void updateCaptivePortalButton() {
+        if (btnCaptivePortalLogin != null) {
+            boolean enabled = CaptivePortalManager.isEnabled(this);
+            btnCaptivePortalLogin.setVisibility(enabled ? View.VISIBLE : View.GONE);
+            if (enabled) {
+                String user = CaptivePortalManager.getUsername(this);
+                if (user != null && !user.isEmpty()) {
+                    btnCaptivePortalLogin.setText("🌐 Login to Internet (" + user + ")");
+                } else {
+                    btnCaptivePortalLogin.setText("🌐 Login to Internet (IISER TVM)");
+                }
+            }
+        }
+    }
+
+    private void handleCaptiveLoginClick() {
+        if (!CaptivePortalManager.isEnabled(this)) {
+            showCaptivePortalConfigDialog(null);
+            return;
+        }
+        String user = CaptivePortalManager.getUsername(this);
+        String pass = CaptivePortalManager.getPassword(this);
+        if (user.isEmpty() || pass.isEmpty()) {
+            Toast.makeText(this, "Please configure your LDAP credentials first", Toast.LENGTH_SHORT).show();
+            showCaptivePortalConfigDialog(null);
+            return;
+        }
+
+        vibrate(25);
+        if (btnCaptivePortalLogin != null) {
+            btnCaptivePortalLogin.setText("⏳ Authenticating with IISER TVM...");
+            btnCaptivePortalLogin.setEnabled(false);
+        }
+
+        CaptivePortalManager.loginAsync(this, result -> {
+            if (btnCaptivePortalLogin != null) {
+                btnCaptivePortalLogin.setEnabled(true);
+                updateCaptivePortalButton();
+            }
+            if (result.success) {
+                vibrate(40);
+                Toast.makeText(MainActivity.this, "✅ " + result.message + " (" + result.latencyMs + "ms)", Toast.LENGTH_LONG).show();
+                // If paired laptop is connected, also trigger laptop login in background
+                PairedDevice active = DeviceManager.getActiveDevice(MainActivity.this);
+                if (active != null && active.isPaired()) {
+                    new Thread(() -> {
+                        CaptivePortalManager.triggerPcLogin(MainActivity.this);
+                    }).start();
+                }
+            } else {
+                vibrate(60);
+                new AlertDialog.Builder(MainActivity.this)
+                        .setTitle("🌐 Internet Login Status")
+                        .setMessage("Gateway returned: " + result.message + "\n\nWould you like to review your credentials or retry?")
+                        .setPositiveButton("Retry", (d, w) -> handleCaptiveLoginClick())
+                        .setNeutralButton("Configure", (d, w) -> showCaptivePortalConfigDialog(null))
+                        .setNegativeButton("Close", null)
+                        .show();
+            }
+        });
+    }
+
+    private void showCaptivePortalActionsDialog() {
+        String[] options = new String[]{
+                "📱 Login This Phone (gateway.iisertvm.ac.in)",
+                "💻 Login Laptop",
+                "⚡ Login Both Phone & Laptop",
+                "⚙️ Configure Portal Credentials"
+        };
+        new AlertDialog.Builder(this)
+                .setTitle("🌐 Campus Internet Authentication")
+                .setItems(options, (dialog, which) -> {
+                    if (which == 0) {
+                        handleCaptiveLoginClick();
+                    } else if (which == 1) {
+                        Toast.makeText(this, "Logging in laptop...", Toast.LENGTH_SHORT).show();
+                        new Thread(() -> {
+                            CaptivePortalManager.LoginResult res = CaptivePortalManager.triggerPcLogin(this);
+                            runOnUiThread(() -> {
+                                if (res.success) {
+                                    Toast.makeText(this, "✅ " + res.message, Toast.LENGTH_SHORT).show();
+                                } else {
+                                    Toast.makeText(this, "❌ Laptop login error: " + res.message, Toast.LENGTH_LONG).show();
+                                }
+                            });
+                        }).start();
+                    } else if (which == 2) {
+                        handleCaptiveLoginClick();
+                        new Thread(() -> CaptivePortalManager.triggerPcLogin(this)).start();
+                    } else if (which == 3) {
+                        showCaptivePortalConfigDialog(null);
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void showCaptivePortalConfigDialog(Runnable onUpdated) {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("🌐 Internet Provider Login Setup");
+
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(50, 25, 50, 15);
+
+        TextView tvHint = new TextView(this);
+        tvHint.setText("Configure your campus captive portal credentials (e.g. gateway.iisertvm.ac.in). Stored locally on this device only.");
+        tvHint.setTextColor(Color.parseColor("#94a3b8"));
+        tvHint.setTextSize(12);
+        tvHint.setPadding(0, 0, 0, 15);
+        layout.addView(tvHint);
+
+        TextView tvGatewayLabel = new TextView(this);
+        tvGatewayLabel.setText("Gateway URL:");
+        tvGatewayLabel.setTextColor(Color.parseColor("#38bdf8"));
+        tvGatewayLabel.setTextSize(12);
+        tvGatewayLabel.setTypeface(null, android.graphics.Typeface.BOLD);
+        layout.addView(tvGatewayLabel);
+
+        final EditText etGateway = new EditText(this);
+        etGateway.setText(CaptivePortalManager.getGatewayUrl(this));
+        etGateway.setTextColor(Color.WHITE);
+        etGateway.setTextSize(13);
+        layout.addView(etGateway);
+
+        TextView tvUserLabel = new TextView(this);
+        tvUserLabel.setText("LDAP / Wi-Fi Username:");
+        tvUserLabel.setTextColor(Color.parseColor("#38bdf8"));
+        tvUserLabel.setTextSize(12);
+        tvUserLabel.setTypeface(null, android.graphics.Typeface.BOLD);
+        tvUserLabel.setPadding(0, 15, 0, 0);
+        layout.addView(tvUserLabel);
+
+        final EditText etUsername = new EditText(this);
+        etUsername.setHint("e.g. chandra26");
+        etUsername.setText(CaptivePortalManager.getUsername(this));
+        etUsername.setTextColor(Color.WHITE);
+        etUsername.setTextSize(13);
+        layout.addView(etUsername);
+
+        TextView tvPassLabel = new TextView(this);
+        tvPassLabel.setText("Password:");
+        tvPassLabel.setTextColor(Color.parseColor("#38bdf8"));
+        tvPassLabel.setTextSize(12);
+        tvPassLabel.setTypeface(null, android.graphics.Typeface.BOLD);
+        tvPassLabel.setPadding(0, 15, 0, 0);
+        layout.addView(tvPassLabel);
+
+        final EditText etPassword = new EditText(this);
+        etPassword.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        etPassword.setText(CaptivePortalManager.getPassword(this));
+        etPassword.setTextColor(Color.WHITE);
+        etPassword.setTextSize(13);
+        layout.addView(etPassword);
+
+        final CheckBox cbAutoLogin = new CheckBox(this);
+        cbAutoLogin.setText("Auto-login when connected to Wi-Fi");
+        cbAutoLogin.setChecked(CaptivePortalManager.isAutoLoginOnWifi(this));
+        cbAutoLogin.setTextColor(Color.parseColor("#e2e8f0"));
+        cbAutoLogin.setTextSize(13);
+        cbAutoLogin.setPadding(0, 15, 0, 10);
+        layout.addView(cbAutoLogin);
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(layout);
+        builder.setView(scroll);
+
+        builder.setPositiveButton("Test & Save", (dialog, which) -> {
+            String gateway = etGateway.getText().toString().trim();
+            String user = etUsername.getText().toString().trim();
+            String pass = etPassword.getText().toString().trim();
+            boolean auto = cbAutoLogin.isChecked();
+
+            Toast.makeText(this, "Testing portal login with " + user + "...", Toast.LENGTH_SHORT).show();
+            new Thread(() -> {
+                CaptivePortalManager.LoginResult res = CaptivePortalManager.login(gateway, user, pass);
+                runOnUiThread(() -> {
+                    if (res.success) {
+                        CaptivePortalManager.saveConfig(MainActivity.this, true, gateway, user, pass, auto);
+                        updateCaptivePortalButton();
+                        if (onUpdated != null) onUpdated.run();
+                        Toast.makeText(MainActivity.this, "✅ Test successful! " + res.message, Toast.LENGTH_LONG).show();
+                    } else {
+                        new AlertDialog.Builder(MainActivity.this)
+                                .setTitle("Portal Test Notice")
+                                .setMessage("Gateway returned: " + res.message + "\n\nSave credentials anyway?")
+                                .setPositiveButton("Save Anyway", (d2, w2) -> {
+                                    CaptivePortalManager.saveConfig(MainActivity.this, true, gateway, user, pass, auto);
+                                    updateCaptivePortalButton();
+                                    if (onUpdated != null) onUpdated.run();
+                                    Toast.makeText(MainActivity.this, "Saved portal configuration", Toast.LENGTH_SHORT).show();
+                                })
+                                .setNegativeButton("Cancel", null)
+                                .show();
+                    }
+                });
+            }).start();
+        });
+
+        builder.setNeutralButton("Save Only", (dialog, which) -> {
+            String gateway = etGateway.getText().toString().trim();
+            String user = etUsername.getText().toString().trim();
+            String pass = etPassword.getText().toString().trim();
+            boolean auto = cbAutoLogin.isChecked();
+            CaptivePortalManager.saveConfig(MainActivity.this, true, gateway, user, pass, auto);
+            updateCaptivePortalButton();
+            if (onUpdated != null) onUpdated.run();
+            Toast.makeText(MainActivity.this, "Saved portal configuration", Toast.LENGTH_SHORT).show();
+        });
+
+        builder.setNegativeButton("Cancel", null);
         builder.show();
     }
 
@@ -2748,6 +3004,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        updateCaptivePortalButton();
         if (RingManager.isRinging()) {
             RingManager.stopAlarm(this);
             Toast.makeText(this, "🔔 Alarm stopped", Toast.LENGTH_SHORT).show();

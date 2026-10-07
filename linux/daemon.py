@@ -16,6 +16,7 @@ import shutil
 import mimetypes
 import struct
 import fcntl
+import re
 from urllib.parse import urlparse, parse_qs, unquote, quote
 import urllib.request
 import urllib.error
@@ -455,8 +456,62 @@ def get_pc_system_status():
         "weather": weather,
         "weather_formatted": weather_formatted,
         "local_url": f"http://{local_ip}:{port}",
-        "internet_url": tunnel_mgr.get_url() if 'tunnel_mgr' in globals() else None
+        "internet_url": tunnel_mgr.get_url() if 'tunnel_mgr' in globals() else None,
+        "captive_portal_supported": os.path.exists(os.path.expanduser('~/bin/iiser-login.sh'))
     }
+
+def trigger_pc_captive_login(body=None):
+    body = body or {}
+    script_path = os.path.expanduser('~/bin/iiser-login.sh')
+    if os.path.exists(script_path) and not body.get('username'):
+        try:
+            res = subprocess.run([script_path], capture_output=True, text=True, timeout=8)
+            out = res.stdout.strip()
+            status = 'LIVE' if 'LIVE' in out or 'signed in' in out else 'OK'
+            return {"status": "ok", "login_status": status, "output": out}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    username = body.get('username')
+    password = body.get('password')
+    gateway_url = body.get('gateway_url', 'https://gateway.iisertvm.ac.in:8090/login.xml')
+    if (not username or not password) and os.path.exists(script_path):
+        try:
+            with open(script_path, 'r') as f:
+                content = f.read()
+                m_user = re.search(r'USERNAME=["\'](.*?)["\']', content)
+                m_pass = re.search(r'PASSWORD=["\'](.*?)["\']', content)
+                if not username and m_user: username = m_user.group(1)
+                if not password and m_pass: password = m_pass.group(1)
+        except Exception:
+            pass
+
+    if not username or not password:
+        return {"status": "error", "message": "Credentials not configured on PC"}
+
+    try:
+        import urllib.request, urllib.parse, ssl
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        data = urllib.parse.urlencode({
+            'mode': '191',
+            'username': username,
+            'password': password,
+            'a': str(int(time.time() * 1000)),
+            'producttype': '0'
+        }).encode('utf-8')
+        req = urllib.request.Request(gateway_url, data=data, headers={
+            'Origin': 'https://gateway.iisertvm.ac.in:8090',
+            'Referer': 'https://gateway.iisertvm.ac.in:8090/httpclient.html',
+            'Content-Type': 'application/x-www-form-urlencoded'
+        })
+        with urllib.request.urlopen(req, context=ctx, timeout=8) as r:
+            out = r.read().decode('utf-8', errors='ignore')
+            status = 'LIVE' if 'LIVE' in out or 'signed in' in out else 'OK'
+            return {"status": "ok", "login_status": status, "output": out}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 def get_display_env():
     env = os.environ.copy()
@@ -3008,6 +3063,17 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
                 return
             ok, msg = unpair_device(ident)
             self.send_json({"status": "ok" if ok else "error", "message": msg})
+
+        # 16. Captive Portal / Campus Auto-Login
+        elif path == '/api/network/captive_login':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
+            res = trigger_pc_captive_login(body)
+            self.send_json(res)
+            return
 
         else:
             self.send_error(404, "Not Found")
