@@ -574,9 +574,25 @@ def format_file_size(size_bytes):
     return f"{size_bytes:.1f} TB"
 
 def search_laptop_files(query, max_results=50):
-    query = (query or '').strip().lower()
+    query = (query or '').strip()
     if not query:
         return []
+
+    # 1. Try ultra-fast indexed search via fsearch-cli
+    fsearch_bin = shutil.which('fsearch-cli') or os.path.expanduser('~/.local/bin/fsearch-cli')
+    if os.path.exists(fsearch_bin) and os.access(fsearch_bin, os.X_OK):
+        try:
+            res = subprocess.run([fsearch_bin, '--json', query, str(max_results)],
+                                 capture_output=True, text=True, timeout=5)
+            if res.returncode == 0 and res.stdout.strip():
+                parsed = json.loads(res.stdout)
+                if isinstance(parsed, list):
+                    return parsed
+        except Exception:
+            pass
+
+    # 2. Fallback to manual walk if fsearch-cli is unavailable
+    query_lower = query.lower()
     base_dirs = [
         os.path.expanduser('~/Downloads'),
         os.path.expanduser('~/Documents'),
@@ -598,15 +614,17 @@ def search_laptop_files(query, max_results=50):
     seen_paths = set()
     results = []
 
+    include_hidden = query.startswith('.')
+
     for bdir in base_dirs:
         if not os.path.exists(bdir):
             continue
         for root, dirs, files in os.walk(bdir):
-            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in skip_dirs]
+            dirs[:] = [d for d in dirs if (include_hidden or not d.startswith('.')) and d not in skip_dirs]
             for fn in files:
-                if fn.startswith('.'):
+                if not include_hidden and fn.startswith('.'):
                     continue
-                if query in fn.lower():
+                if query_lower in fn.lower():
                     full_p = os.path.join(root, fn)
                     if full_p in seen_paths:
                         continue
@@ -616,6 +634,7 @@ def search_laptop_files(query, max_results=50):
                         results.append({
                             "name": fn,
                             "path": full_p,
+                            "is_dir": False,
                             "size": st.st_size,
                             "size_formatted": format_file_size(st.st_size),
                             "mtime": int(st.st_mtime),
@@ -838,14 +857,18 @@ def get_open_terminals():
                 
                 for sid in session_ids:
                     spath = f'/Sessions/{sid}'
+                    
+                    # Verify session is actively alive
+                    sh_res = subprocess.run(['qdbus6', svc, spath, 'org.kde.konsole.Session.processId'], capture_output=True, text=True, timeout=1)
+                    sh_pid = sh_res.stdout.strip()
+                    if not sh_pid or not os.path.exists(f'/proc/{sh_pid}'):
+                        continue
+
                     t_res = subprocess.run(['qdbus6', svc, spath, 'org.kde.konsole.Session.title', '1'], capture_output=True, text=True, timeout=1)
                     title = t_res.stdout.strip()
                     
                     fg_res = subprocess.run(['qdbus6', svc, spath, 'org.kde.konsole.Session.foregroundProcessId'], capture_output=True, text=True, timeout=1)
                     fg_pid = fg_res.stdout.strip()
-                    
-                    sh_res = subprocess.run(['qdbus6', svc, spath, 'org.kde.konsole.Session.processId'], capture_output=True, text=True, timeout=1)
-                    sh_pid = sh_res.stdout.strip()
                     
                     cwd = ''
                     tty = ''
@@ -859,6 +882,7 @@ def get_open_terminals():
                             if 'pts' in fd0:
                                 tty = os.path.basename(fd0)
                                 seen_ttys.add(tty)
+                                seen_ttys.add(f'pts/{tty}')
                         except Exception:
                             pass
                             
@@ -876,7 +900,7 @@ def get_open_terminals():
                         except Exception:
                             pass
                             
-                    txt_res = subprocess.run(['qdbus6', svc, spath, 'org.kde.konsole.Session.getDisplayedText', '0', '6'], capture_output=True, text=True, timeout=1)
+                    txt_res = subprocess.run(['qdbus6', svc, spath, 'org.kde.konsole.Session.getDisplayedText', '0', '4'], capture_output=True, text=True, timeout=1)
                     preview = txt_res.stdout.strip()
                     
                     terminals.append({
@@ -896,7 +920,11 @@ def get_open_terminals():
     except Exception:
         pass
 
-    # Query additional terminals on pts (tmux, kitty, alacritty, etc.)
+    # When live GUI terminals (Konsole) exist, only return those! Avoid underlying pts duplicates.
+    if terminals:
+        return terminals
+
+    # Fallback to standalone TTY/PTS processes only if no GUI terminal is open
     try:
         ps_out = subprocess.run(['ps', '-eo', 'pid,tty,comm,args'], capture_output=True, text=True, timeout=2)
         for line in ps_out.stdout.splitlines()[1:]:
@@ -928,21 +956,27 @@ def get_open_terminals():
 
     return terminals
 
-def read_terminal(term_id, max_lines=120):
+def read_terminal(term_id, max_lines=35):
     if ':' in term_id and 'org.kde.konsole' in term_id:
         svc, sid = term_id.split(':', 1)
         spath = f'/Sessions/{sid}'
         t_res = subprocess.run(['qdbus6', svc, spath, 'org.kde.konsole.Session.title', '1'], capture_output=True, text=True, timeout=1)
         title = t_res.stdout.strip()
         txt_res = subprocess.run(['qdbus6', svc, spath, 'org.kde.konsole.Session.getAllDisplayedText'], capture_output=True, text=True, timeout=2)
-        lines = txt_res.stdout.splitlines()
-        if len(lines) > max_lines:
-            lines = lines[-max_lines:]
+        all_lines = txt_res.stdout.splitlines()
+        total_count = len(all_lines)
+        if len(all_lines) > max_lines:
+            lines = all_lines[-max_lines:]
+        else:
+            lines = all_lines
         return {
             'status': 'ok',
             'id': term_id,
             'title': title,
-            'text': '\n'.join(lines)
+            'text': '\n'.join(lines),
+            'total_lines': total_count,
+            'returned_lines': len(lines),
+            'has_more': total_count > len(lines)
         }
     return {'status': 'error', 'message': 'Terminal not found or inaccessible'}
 
@@ -2332,11 +2366,12 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             else:
                 parent_path = os.path.dirname(req_path)
 
+            show_hidden = qs.get('hidden', ['0'])[0] in ('1', 'true', 'True')
             items = []
             try:
                 with os.scandir(req_path) as it:
                     for entry in it:
-                        if entry.name.startswith('.'):
+                        if not show_hidden and entry.name.startswith('.'):
                             continue
                         try:
                             is_dir = entry.is_dir(follow_symlinks=False)
@@ -2347,6 +2382,7 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
                                 "name": entry.name,
                                 "path": entry.path,
                                 "is_dir": is_dir,
+                                "is_hidden": entry.name.startswith('.'),
                                 "size": size_bytes,
                                 "size_formatted": size_str,
                                 "mtime": int(st.st_mtime)

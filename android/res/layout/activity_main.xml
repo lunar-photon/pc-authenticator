@@ -1113,6 +1113,19 @@
                     android:ellipsize="start"
                     android:layout_marginBottom="6dp" />
 
+                <!-- Load earlier history button -->
+                <Button
+                    android:id="@+id/btn_term_load_earlier"
+                    android:layout_width="match_parent"
+                    android:layout_height="28dp"
+                    android:text="⬆ Load earlier output"
+                    android:textSize="10sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/accent_cyan"
+                    android:background="@drawable/card_bg"
+                    android:visibility="gone"
+                    android:layout_marginBottom="4dp" />
+
                 <!-- Terminal Screen (Monospace, Console Box) -->
                 <ScrollView
                     android:id="@+id/scroll_term_screen"

@@ -82,6 +82,7 @@ EOF
         sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$TARGET_UID" systemctl --user daemon-reload >/dev/null 2>&1 || true
         sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$TARGET_UID" systemctl --user enable pc-authenticator.service pc-connect-tray.service >/dev/null 2>&1 || true
         sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$TARGET_UID" systemctl --user restart pc-authenticator.service pc-connect-tray.service >/dev/null 2>&1 || true
+        loginctl enable-linger "$TARGET_USER" >/dev/null 2>&1 || true
         
         if sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$TARGET_UID" systemctl --user is-active --quiet pc-authenticator.service; then
             echo -e "${GREEN}[✓] Background daemon (pc-authenticator.service) is active.${NC}"
@@ -439,17 +440,15 @@ install_passwordless() {
 
     install_core_files
 
-    echo -e "${CYAN}[*] Backing up existing /etc/pam.d/kde...${NC}"
-    if [ -f /etc/pam.d/kde ]; then
-        cp /etc/pam.d/kde "/etc/pam.d/kde.bak.$(date +%s)"
-    fi
+    echo -e "${CYAN}[*] Writing Passwordless PAM configuration to /etc/pam.d/ (kde, plasmalogin, sddm)...${NC}"
+    for p in /etc/pam.d/kde /etc/pam.d/plasmalogin /etc/pam.d/sddm; do
+        if [ -f "$p" ]; then
+            cp "$p" "$p.bak.$(date +%s)"
+        fi
+    done
 
-    echo -e "${CYAN}[*] Writing Passwordless PAM configuration to /etc/pam.d/kde...${NC}"
     cat <<'EOF' > /etc/pam.d/kde
 #%PAM-1.0
-# PC Authenticator - Passwordless Mobile Unlock with Password Fallback
-# 1. If Enter is pressed with empty password -> Phone Biometric Fingerprint approves
-# 2. If password is typed -> Standard unix password verifies immediately
 auth       [success=done default=ignore] pam_exec.so expose_authtok quiet /usr/local/bin/lockscreen-auth-check --passwordless
 auth       include                     system-local-login
 account    include                     system-local-login
@@ -458,14 +457,43 @@ session    include                     system-local-login
 EOF
     chmod 644 /etc/pam.d/kde
 
+    cat <<'EOF' > /etc/pam.d/plasmalogin
+#%PAM-1.0
+auth       [success=done default=ignore] pam_exec.so expose_authtok quiet /usr/local/bin/lockscreen-auth-check --passwordless
+auth        include     system-login
+-auth       optional    pam_gnome_keyring.so
+-auth       optional    pam_kwallet5.so
+account     include     system-login
+password    include     system-login
+session     optional    pam_keyinit.so          force revoke
+session     include     system-login
+-session    optional    pam_gnome_keyring.so    auto_start
+-session    optional    pam_kwallet5.so         auto_start
+EOF
+    chmod 644 /etc/pam.d/plasmalogin
+
+    cat <<'EOF' > /etc/pam.d/sddm
+#%PAM-1.0
+auth       [success=done default=ignore] pam_exec.so expose_authtok quiet /usr/local/bin/lockscreen-auth-check --passwordless
+auth        include     system-login
+-auth       optional    pam_gnome_keyring.so
+-auth       optional    pam_kwallet5.so
+account     include     system-login
+password    include     system-login
+session     optional    pam_keyinit.so          force revoke
+session     include     system-login
+-session    optional    pam_gnome_keyring.so    auto_start
+-session    optional    pam_kwallet5.so         auto_start
+EOF
+    chmod 644 /etc/pam.d/sddm
+
     echo -e "\n${GREEN}${BOLD}==========================================================${NC}"
     echo -e "${GREEN}${BOLD} [✓] Passwordless Mobile Unlock Successfully Installed!   ${NC}"
     echo -e "${GREEN}${BOLD}==========================================================${NC}"
     echo -e "\n👉 ${BOLD}How to test right now:${NC}"
-    echo -e "   1. Lock your screen:  ${CYAN}loginctl lock-session${NC}"
-    echo -e "   2. Hit ${BOLD}Enter${NC} on the lock screen (leave password blank)."
-    echo -e "   3. Scan your fingerprint on your phone to unlock!"
-    echo -e "   4. Or type your Linux password anytime to unlock via password."
+    echo -e "   1. Lock screen or restart laptop: ${CYAN}loginctl lock-session${NC}"
+    echo -e "   2. Hit ${BOLD}Enter${NC} on empty password field to approve on phone."
+    echo -e "   3. Or type your Linux password anytime to unlock via password."
     echo -e "\nTo revert at any time, run: ${YELLOW}sudo bash $0 --revert${NC}\n"
 }
 
@@ -477,12 +505,13 @@ install_2fa() {
 
     install_core_files
 
-    echo -e "${CYAN}[*] Backing up existing /etc/pam.d/kde...${NC}"
-    if [ -f /etc/pam.d/kde ]; then
-        cp /etc/pam.d/kde "/etc/pam.d/kde.bak.$(date +%s)"
-    fi
+    echo -e "${CYAN}[*] Writing Strict 2FA PAM configuration to /etc/pam.d/ (kde, plasmalogin, sddm)...${NC}"
+    for p in /etc/pam.d/kde /etc/pam.d/plasmalogin /etc/pam.d/sddm; do
+        if [ -f "$p" ]; then
+            cp "$p" "$p.bak.$(date +%s)"
+        fi
+    done
 
-    echo -e "${CYAN}[*] Writing Strict 2FA PAM configuration to /etc/pam.d/kde...${NC}"
     cat <<'EOF' > /etc/pam.d/kde
 #%PAM-1.0
 # PC Authenticator - Strict 2FA (Linux Password + Mobile Biometric Approval)
@@ -494,25 +523,60 @@ session    include                     system-local-login
 EOF
     chmod 644 /etc/pam.d/kde
 
+    cat <<'EOF' > /etc/pam.d/plasmalogin
+#%PAM-1.0
+# PC Authenticator - Strict 2FA for Plasma Login Manager on Boot
+auth        include     system-login
+auth        required    pam_exec.so quiet /usr/local/bin/lockscreen-auth-check
+-auth       optional    pam_gnome_keyring.so
+-auth       optional    pam_kwallet5.so
+account     include     system-login
+password    include     system-login
+session     optional    pam_keyinit.so          force revoke
+session     include     system-login
+-session    optional    pam_gnome_keyring.so    auto_start
+-session    optional    pam_kwallet5.so         auto_start
+EOF
+    chmod 644 /etc/pam.d/plasmalogin
+
+    cat <<'EOF' > /etc/pam.d/sddm
+#%PAM-1.0
+# PC Authenticator - Strict 2FA for SDDM on Boot
+auth        include     system-login
+auth        required    pam_exec.so quiet /usr/local/bin/lockscreen-auth-check
+-auth       optional    pam_gnome_keyring.so
+-auth       optional    pam_kwallet5.so
+account     include     system-login
+password    include     system-login
+session     optional    pam_keyinit.so          force revoke
+session     include     system-login
+-session    optional    pam_gnome_keyring.so    auto_start
+-session    optional    pam_kwallet5.so         auto_start
+EOF
+    chmod 644 /etc/pam.d/sddm
+
     echo -e "\n${GREEN}${BOLD}==========================================================${NC}"
     echo -e "${GREEN}${BOLD} [✓] Strict 2FA Mode Successfully Installed!              ${NC}"
     echo -e "${GREEN}${BOLD}==========================================================${NC}"
-    echo -e "\n👉 ${BOLD}How it works on lock screen:${NC}"
-    echo -e "   1. Type your standard Linux password and press Enter."
-    echo -e "   2. Scan your fingerprint on your phone to complete unlock."
+    echo -e "\n👉 ${BOLD}How it works on boot & lock screen:${NC}"
+    echo -e "   1. Power on laptop after shutdown or lock screen."
+    echo -e "   2. Type your standard Linux password and press Enter."
+    echo -e "   3. Scan your fingerprint on your phone to complete unlock."
     echo -e "\nTo revert at any time, run: ${YELLOW}sudo bash $0 --revert${NC}\n"
 }
 
 revert_to_password() {
     require_root --revert
     print_banner
-    echo -e "${YELLOW}[*] Reverting lock screen to standard password-only...${NC}"
+    echo -e "${YELLOW}[*] Reverting login & lock screen to standard password-only...${NC}"
 
-    # Remove PAM hook
-    if [ -f /etc/pam.d/kde ]; then
-        rm -f /etc/pam.d/kde
-        echo -e "${GREEN}[✓] Removed custom /etc/pam.d/kde hook.${NC}"
-    fi
+    # Remove PAM hooks
+    for pam_file in /etc/pam.d/kde /etc/pam.d/plasmalogin /etc/pam.d/sddm; do
+        if [ -f "$pam_file" ]; then
+            rm -f "$pam_file"
+            echo -e "${GREEN}[✓] Removed custom $pam_file hook.${NC}"
+        fi
+    done
 
     # Remove binary
     if [ -f /usr/local/bin/lockscreen-auth-check ]; then
@@ -529,9 +593,9 @@ revert_to_password() {
     fi
 
     echo -e "\n${GREEN}${BOLD}==========================================================${NC}"
-    echo -e "${GREEN}${BOLD} [✓] Lock screen successfully reverted to standard password! ${NC}"
+    echo -e "${GREEN}${BOLD} [✓] Successfully reverted to standard password!          ${NC}"
     echo -e "${GREEN}${BOLD}==========================================================${NC}"
-    echo -e "KDE Plasma lock screen is now restored to standard password authentication.\n"
+    echo -e "Login manager & lock screen are now restored to standard password authentication.\n"
 }
 
 show_status() {
@@ -601,17 +665,22 @@ for s in serials:
 " 2>/dev/null || true
     fi
 
-    # 5. Lock Screen PAM Status
-    if [ -f /etc/pam.d/kde ]; then
-        if grep -q "passwordless" /etc/pam.d/kde; then
-            echo -e " • Lock Screen PAM:    ${GREEN}Enabled (Mode 1: Passwordless Mobile Fingerprint)${NC}"
-        elif grep -q "lockscreen-auth-check" /etc/pam.d/kde; then
-            echo -e " • Lock Screen PAM:    ${GREEN}Enabled (Mode 2: Strict 2FA)${NC}"
+    # 5. Lock Screen & Boot Login PAM Status
+    if [ -f /etc/pam.d/kde ] || [ -f /etc/pam.d/plasmalogin ] || [ -f /etc/pam.d/sddm ]; then
+        MODE_NAME="Custom"
+        if grep -q "passwordless" /etc/pam.d/kde 2>/dev/null || grep -q "passwordless" /etc/pam.d/plasmalogin 2>/dev/null; then
+            MODE_NAME="Mode 1: Passwordless Mobile Fingerprint"
+        elif grep -q "lockscreen-auth-check" /etc/pam.d/kde 2>/dev/null || grep -q "lockscreen-auth-check" /etc/pam.d/plasmalogin 2>/dev/null; then
+            MODE_NAME="Mode 2: Strict 2FA (Password + Phone)"
+        fi
+        echo -e " • Lock Screen PAM:    ${GREEN}Enabled ($MODE_NAME)${NC}"
+        if [ -f /etc/pam.d/plasmalogin ] || [ -f /etc/pam.d/sddm ]; then
+            echo -e " • Boot Login PAM:     ${GREEN}Enabled (Active on boot after shutdown)${NC}"
         else
-            echo -e " • Lock Screen PAM:    ${YELLOW}Custom / Unknown PAM config${NC}"
+            echo -e " • Boot Login PAM:     ${YELLOW}Not installed (Run: sudo pc-auth --2fa)${NC}"
         fi
     else
-        echo -e " • Lock Screen PAM:    ${YELLOW}Disabled (Standard Password-Only)${NC}"
+        echo -e " • Lock & Boot PAM:    ${YELLOW}Disabled (Standard Password-Only)${NC}"
     fi
     echo ""
 }

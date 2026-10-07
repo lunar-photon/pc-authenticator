@@ -165,6 +165,7 @@ public class MainActivity extends Activity {
     private TextView tvInteractiveCwd;
     private ScrollView scrollTermScreen;
     private TextView tvTermScreen;
+    private Button btnTermLoadEarlier;
 
     private Button btnKeyCtrlC;
     private Button btnKeyTab;
@@ -179,6 +180,9 @@ public class MainActivity extends Activity {
     private String activeTerminalId = null;
     private String activeTerminalTitle = "";
     private String activeTerminalCwd = "";
+    private int currentTerminalLinesToFetch = 35;
+    private boolean hasMoreTerminalHistory = false;
+    private boolean isLoadingEarlier = false;
     private Handler terminalHandler = new Handler(Looper.getMainLooper());
     private Runnable terminalPollRunnable = null;
 
@@ -2967,6 +2971,11 @@ public class MainActivity extends Activity {
         Button btnUp = dialogView.findViewById(R.id.btn_browse_up);
         TextView tvPath = dialogView.findViewById(R.id.tv_browse_path);
         Button btnRefresh = dialogView.findViewById(R.id.btn_browse_refresh);
+        Button btnHidden = dialogView.findViewById(R.id.btn_browse_hidden);
+
+        final boolean[] showHidden = new boolean[] {
+            getSharedPreferences("pc_auth_prefs", MODE_PRIVATE).getBoolean("browse_show_hidden", false)
+        };
 
         Button btnShortcutDrives = dialogView.findViewById(R.id.btn_shortcut_drives);
         Button btnQuickDownloads = dialogView.findViewById(R.id.btn_shortcut_downloads);
@@ -2991,7 +3000,7 @@ public class MainActivity extends Activity {
                 new Thread(() -> {
                     try {
                         PairedDevice active = DeviceManager.getActiveDevice(MainActivity.this);
-                        String url = active.getBaseUrl() + "/api/laptop/files/list?path=" + URLEncoder.encode(targetPath, "UTF-8");
+                        String url = active.getBaseUrl() + "/api/laptop/files/list?path=" + URLEncoder.encode(targetPath, "UTF-8") + "&hidden=" + (showHidden[0] ? "1" : "0");
                         HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
                         NetworkUtils.applyTunnelHeaders(conn);
                         conn.setRequestMethod("GET");
@@ -3052,7 +3061,9 @@ public class MainActivity extends Activity {
                                     Button btnAction = row.findViewById(R.id.btn_browse_item_action);
                                     Button btnDownload = row.findViewById(R.id.btn_browse_item_download);
 
-                                    tvName.setText(name);
+                                    boolean isHidden = it.optBoolean("is_hidden", false) || name.startsWith(".");
+                                    tvName.setText(isHidden ? "· " + name : name);
+                                    tvName.setAlpha(isHidden ? 0.65f : 1.0f);
                                     if (isDir) {
                                         tvIcon.setText(!customIcon.isEmpty() ? customIcon : "📁");
                                         tvDetails.setText("Directory / Folder");
@@ -3112,7 +3123,19 @@ public class MainActivity extends Activity {
                 loader.load(parentBrowsePath);
             }
         });
-        btnRefresh.setOnClickListener(v -> loader.load(currentBrowsePath));
+        btnRefresh.setOnClickListener(v -> loader.load(currentBrowsePath != null ? currentBrowsePath : "shortcuts"));
+
+        if (btnHidden != null) {
+            btnHidden.setText(showHidden[0] ? "👁️" : "👁️‍🗨️");
+            btnHidden.setTextColor(showHidden[0] ? getColor(R.color.accent_cyan) : getColor(R.color.text_muted));
+            btnHidden.setOnClickListener(v -> {
+                showHidden[0] = !showHidden[0];
+                getSharedPreferences("pc_auth_prefs", MODE_PRIVATE).edit().putBoolean("browse_show_hidden", showHidden[0]).apply();
+                btnHidden.setText(showHidden[0] ? "👁️" : "👁️‍🗨️");
+                btnHidden.setTextColor(showHidden[0] ? getColor(R.color.accent_cyan) : getColor(R.color.text_muted));
+                loader.load(currentBrowsePath != null ? currentBrowsePath : "shortcuts");
+            });
+        }
 
         btnQuickDownloads.setOnClickListener(v -> loader.load("~/Downloads"));
         btnQuickDocs.setOnClickListener(v -> loader.load("~/Documents"));
@@ -3422,6 +3445,19 @@ public class MainActivity extends Activity {
         tvInteractiveCwd = findViewById(R.id.tv_interactive_cwd);
         scrollTermScreen = findViewById(R.id.scroll_term_screen);
         tvTermScreen = findViewById(R.id.tv_term_screen);
+        btnTermLoadEarlier = findViewById(R.id.btn_term_load_earlier);
+
+        if (btnTermLoadEarlier != null) {
+            btnTermLoadEarlier.setOnClickListener(v -> loadEarlierTerminalHistory());
+        }
+
+        if (scrollTermScreen != null) {
+            scrollTermScreen.getViewTreeObserver().addOnScrollChangedListener(() -> {
+                if (scrollTermScreen.getScrollY() <= 15 && hasMoreTerminalHistory && !isLoadingEarlier) {
+                    loadEarlierTerminalHistory();
+                }
+            });
+        }
 
         btnKeyCtrlC = findViewById(R.id.btn_key_ctrl_c);
         btnKeyTab = findViewById(R.id.btn_key_tab);
@@ -3613,7 +3649,11 @@ public class MainActivity extends Activity {
         activeTerminalId = termId;
         activeTerminalTitle = title;
         activeTerminalCwd = cwd;
+        currentTerminalLinesToFetch = 35;
+        hasMoreTerminalHistory = false;
+        isLoadingEarlier = false;
 
+        if (btnTermLoadEarlier != null) btnTermLoadEarlier.setVisibility(View.GONE);
         if (scrollTermList != null) scrollTermList.setVisibility(View.GONE);
         if (layoutTerminalInteractive != null) layoutTerminalInteractive.setVisibility(View.VISIBLE);
 
@@ -3626,6 +3666,14 @@ public class MainActivity extends Activity {
 
         pollActiveTerminalOutput();
         startTerminalStreamTimer();
+    }
+
+    private void loadEarlierTerminalHistory() {
+        if (!hasMoreTerminalHistory || isLoadingEarlier) return;
+        isLoadingEarlier = true;
+        currentTerminalLinesToFetch += 45;
+        if (btnTermLoadEarlier != null) btnTermLoadEarlier.setText("⏳ Loading earlier history...");
+        pollActiveTerminalOutput();
     }
 
     private void closeTerminalInteractive() {
@@ -3665,23 +3713,48 @@ public class MainActivity extends Activity {
         new Thread(() -> {
             try {
                 String encodedId = java.net.URLEncoder.encode(activeTerminalId, "UTF-8");
-                String url = active.getBaseUrl() + "/api/terminals/read?id=" + encodedId + "&lines=140";
+                String url = active.getBaseUrl() + "/api/terminals/read?id=" + encodedId + "&lines=" + currentTerminalLinesToFetch;
                 String res = NetworkUtils.httpGetWithAuth(url, active.authToken, 3000);
                 if (res != null) {
                     JSONObject obj = new JSONObject(res);
                     if ("ok".equals(obj.optString("status"))) {
                         final String text = obj.optString("text", "");
+                        final boolean hasMore = obj.optBoolean("has_more", false);
+                        final int total = obj.optInt("total_lines", 0);
+                        final int returned = obj.optInt("returned_lines", 0);
+                        final int remaining = Math.max(0, total - returned);
+
                         runOnUiThread(() -> {
+                            hasMoreTerminalHistory = hasMore;
+                            isLoadingEarlier = false;
+
+                            if (btnTermLoadEarlier != null) {
+                                if (hasMore && remaining > 0) {
+                                    btnTermLoadEarlier.setVisibility(View.VISIBLE);
+                                    btnTermLoadEarlier.setText("⬆ Load earlier output (" + remaining + " lines above)");
+                                } else {
+                                    btnTermLoadEarlier.setVisibility(View.GONE);
+                                }
+                            }
+
                             if (tvTermScreen != null) {
                                 tvTermScreen.setText(text.isEmpty() ? "(Empty terminal)" : text);
                             }
+
                             if (scrollTermScreen != null) {
-                                scrollTermScreen.post(() -> scrollTermScreen.fullScroll(View.FOCUS_DOWN));
+                                int scrollY = scrollTermScreen.getScrollY();
+                                int bottom = tvTermScreen != null ? tvTermScreen.getBottom() : 0;
+                                int height = scrollTermScreen.getHeight();
+                                if (bottom - (scrollY + height) < 180 || currentTerminalLinesToFetch <= 35) {
+                                    scrollTermScreen.post(() -> scrollTermScreen.fullScroll(View.FOCUS_DOWN));
+                                }
                             }
                         });
                     }
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                isLoadingEarlier = false;
+            }
         }).start();
     }
 
