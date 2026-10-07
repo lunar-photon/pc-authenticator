@@ -1347,10 +1347,18 @@ public class MainActivity extends Activity {
             Toast.makeText(MainActivity.this, "Probing network for captive portal...", Toast.LENGTH_SHORT).show();
             new Thread(() -> {
                 String detected = CaptivePortalManager.detectGatewayUrl(MainActivity.this);
+                boolean live = CaptivePortalManager.isInternetConnected(MainActivity.this);
                 runOnUiThread(() -> {
                     if (detected != null && !detected.isEmpty()) {
                         etGateway.setText(detected);
-                        Toast.makeText(MainActivity.this, "✅ Detected: " + detected, Toast.LENGTH_SHORT).show();
+                        if (live) {
+                            Toast.makeText(MainActivity.this, "✅ Detected: " + detected + "\n(Internet is already active & LIVE)", Toast.LENGTH_LONG).show();
+                        } else {
+                            Toast.makeText(MainActivity.this, "✅ Detected: " + detected, Toast.LENGTH_SHORT).show();
+                        }
+                    } else if (live) {
+                        etGateway.setText(CaptivePortalManager.DEFAULT_GATEWAY_URL);
+                        Toast.makeText(MainActivity.this, "🌐 Internet is already active & LIVE!\nUsing default: " + CaptivePortalManager.DEFAULT_GATEWAY_URL, Toast.LENGTH_LONG).show();
                     } else {
                         Toast.makeText(MainActivity.this, "No captive portal redirect detected on current Wi-Fi", Toast.LENGTH_SHORT).show();
                     }

@@ -362,6 +362,7 @@ public class CaptivePortalManager {
                 "http://clients3.google.com/generate_204",
                 "http://www.google.com/gen_204"
         };
+        boolean all204 = true;
         for (String probeUrl : probeUrls) {
             HttpURLConnection conn = null;
             try {
@@ -377,6 +378,9 @@ public class CaptivePortalManager {
                 conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android; PCAuthenticator)");
                 int code = conn.getResponseCode();
                 logDebug(context, "Probe " + probeUrl + " -> HTTP " + code);
+                if (code != 204) {
+                    all204 = false;
+                }
                 if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
                     String loc = conn.getHeaderField("Location");
                     if (loc != null && !loc.trim().isEmpty()) {
@@ -406,6 +410,7 @@ public class CaptivePortalManager {
                     }
                 }
             } catch (Exception e) {
+                all204 = false;
                 logDebug(context, "Detection probe error on " + probeUrl + ": " + e.getMessage());
             } finally {
                 if (conn != null) {
@@ -413,6 +418,43 @@ public class CaptivePortalManager {
                 }
             }
         }
+
+        // If internet is already functioning (all probes returned 204), test if campus gateway is reachable
+        if (all204) {
+            String[] campusCandidates = new String[]{
+                    DEFAULT_GATEWAY_URL,
+                    "https://172.16.31.101:8090/login.xml"
+            };
+            for (String cand : campusCandidates) {
+                try {
+                    URL u = new URL(cand);
+                    HttpURLConnection c = (wifiNet != null) ? (HttpURLConnection) wifiNet.openConnection(u) : (HttpURLConnection) u.openConnection();
+                    if (c instanceof HttpsURLConnection) {
+                        HttpsURLConnection hc = (HttpsURLConnection) c;
+                        TrustManager[] trustAll = new TrustManager[]{
+                            new X509TrustManager() {
+                                public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
+                                public void checkClientTrusted(X509Certificate[] certs, String authType) {}
+                                public void checkServerTrusted(X509Certificate[] certs, String authType) {}
+                            }
+                        };
+                        SSLContext sc = SSLContext.getInstance("TLS");
+                        sc.init(null, trustAll, new SecureRandom());
+                        hc.setSSLSocketFactory(sc.getSocketFactory());
+                        hc.setHostnameVerifier((h, s) -> true);
+                    }
+                    c.setRequestMethod("GET");
+                    c.setConnectTimeout(2500);
+                    c.setReadTimeout(2500);
+                    int rCode = c.getResponseCode();
+                    logDebug(context, "Campus gateway probe " + cand + " -> HTTP " + rCode);
+                    if (rCode > 0) {
+                        return cand;
+                    }
+                } catch (Exception ignored) {}
+            }
+        }
+
         return null;
     }
 
