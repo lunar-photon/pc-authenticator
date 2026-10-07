@@ -1256,6 +1256,7 @@ public class MainActivity extends Activity {
         boolean wifiActive = DeviceManager.isWifiActive(this);
         String user = CaptivePortalManager.getUsername(this);
         String userLabel = user.isEmpty() ? "Portal" : user;
+        boolean explicitlyLoggedOut = CaptivePortalManager.isExplicitlyLoggedOut(this);
 
         if (!wifiActive) {
             isCaptiveLive = false;
@@ -1267,6 +1268,20 @@ public class MainActivity extends Activity {
                 btnCaptivePortalToggle.setEnabled(false);
                 btnCaptivePortalToggle.setText("🌐 Wi-Fi Disconnected");
                 btnCaptivePortalToggle.setBackgroundResource(R.drawable.btn_deny);
+            }
+            return;
+        }
+
+        if (explicitlyLoggedOut) {
+            isCaptiveLive = false;
+            if (tvCaptiveStatusBadge != null) {
+                tvCaptiveStatusBadge.setText("🔴 Logged Out (" + userLabel + ")");
+                tvCaptiveStatusBadge.setTextColor(Color.parseColor("#ef4444"));
+            }
+            if (btnCaptivePortalToggle != null) {
+                btnCaptivePortalToggle.setEnabled(true);
+                btnCaptivePortalToggle.setText("🌐 Login to Internet (" + userLabel + ")");
+                btnCaptivePortalToggle.setBackgroundResource(R.drawable.btn_approve);
             }
             return;
         }
@@ -1312,6 +1327,20 @@ public class MainActivity extends Activity {
                     return;
                 }
 
+                if (CaptivePortalManager.isExplicitlyLoggedOut(MainActivity.this)) {
+                    isCaptiveLive = false;
+                    if (tvCaptiveStatusBadge != null) {
+                        tvCaptiveStatusBadge.setText("🔴 Logged Out (" + userLabel + ")");
+                        tvCaptiveStatusBadge.setTextColor(Color.parseColor("#ef4444"));
+                    }
+                    if (btnCaptivePortalToggle != null) {
+                        btnCaptivePortalToggle.setEnabled(true);
+                        btnCaptivePortalToggle.setText("🌐 Login to Internet (" + userLabel + ")");
+                        btnCaptivePortalToggle.setBackgroundResource(R.drawable.btn_approve);
+                    }
+                    return;
+                }
+
                 if (tvCaptiveStatusBadge != null) {
                     if (live) {
                         tvCaptiveStatusBadge.setText("🟢 Internet LIVE (" + userLabel + ")");
@@ -1336,6 +1365,7 @@ public class MainActivity extends Activity {
     }
 
     private void handleCaptiveLoginClick() {
+        CaptivePortalManager.setExplicitlyLoggedOut(this, false);
         if (!CaptivePortalManager.isEnabled(this)) {
             showCaptivePortalConfigDialog(null);
             return;
@@ -1387,6 +1417,8 @@ public class MainActivity extends Activity {
     }
 
     private void handleCaptiveLogoutClick() {
+        CaptivePortalManager.setExplicitlyLoggedOut(this, true);
+        isCaptiveLive = false;
         vibrate(25);
         if (btnCaptivePortalToggle != null) {
             btnCaptivePortalToggle.setText("⏳ Logging out...");
@@ -1412,9 +1444,9 @@ public class MainActivity extends Activity {
     }
 
     private void showCaptivePortalActionsDialog() {
-        String toggleOption = isCaptiveLive ? "🚪 Logout of Internet" : "🌐 Login to Internet";
         String[] options = new String[]{
-                toggleOption,
+                "🌐 Force Login to Internet",
+                "🚪 Force Logout of Internet",
                 "🔍 Auto-Detect Network Gateway",
                 "⚙️ Configure Credentials & Settings"
         };
@@ -1422,12 +1454,10 @@ public class MainActivity extends Activity {
                 .setTitle("🌐 Captive Portal & Internet")
                 .setItems(options, (dialog, which) -> {
                     if (which == 0) {
-                        if (isCaptiveLive) {
-                            handleCaptiveLogoutClick();
-                        } else {
-                            handleCaptiveLoginClick();
-                        }
+                        handleCaptiveLoginClick();
                     } else if (which == 1) {
+                        handleCaptiveLogoutClick();
+                    } else if (which == 2) {
                         Toast.makeText(this, "Auto-detecting captive gateway on current network...", Toast.LENGTH_SHORT).show();
                         new Thread(() -> {
                             String detected = CaptivePortalManager.detectGatewayUrl(MainActivity.this);
@@ -1444,7 +1474,7 @@ public class MainActivity extends Activity {
                                 }
                             });
                         }).start();
-                    } else if (which == 2) {
+                    } else if (which == 3) {
                         showCaptivePortalConfigDialog(null);
                     }
                 })

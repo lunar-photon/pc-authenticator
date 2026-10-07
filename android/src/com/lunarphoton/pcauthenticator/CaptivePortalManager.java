@@ -656,29 +656,25 @@ public class CaptivePortalManager {
     }
 
     public static boolean isInternetConnected() {
-        return isInternetConnected(null);
+        return false;
     }
 
     public static boolean isInternetConnected(Context context) {
-        if (context != null && !DeviceManager.isWifiActive(context)) {
+        if (context == null || !DeviceManager.isWifiActive(context)) {
             return false;
         }
-        Network wifiNet = (context != null) ? DeviceManager.getWifiNetwork(context) : null;
-        if (context != null && wifiNet == null) {
+        Network wifiNet = DeviceManager.getWifiNetwork(context);
+        if (wifiNet == null) {
             return false;
         }
 
         HttpURLConnection conn = null;
         try {
             URL url = new URL("http://connectivitycheck.gstatic.com/generate_204");
-            if (wifiNet != null) {
-                conn = (HttpURLConnection) wifiNet.openConnection(url);
-            } else {
-                conn = (HttpURLConnection) url.openConnection();
-            }
+            conn = (HttpURLConnection) wifiNet.openConnection(url);
             conn.setInstanceFollowRedirects(false);
-            conn.setConnectTimeout(2500);
-            conn.setReadTimeout(2500);
+            conn.setConnectTimeout(2000);
+            conn.setReadTimeout(2000);
             int code = conn.getResponseCode();
             return code == 204;
         } catch (Exception e) {
