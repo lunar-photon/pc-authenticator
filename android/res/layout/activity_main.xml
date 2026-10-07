@@ -125,13 +125,13 @@
                     android:layout_height="wrap_content"
                     android:text="● "
                     android:textSize="18sp"
-                    android:textColor="@color/status_green" />
+                    android:textColor="@color/text_muted" />
 
                 <TextView
                     android:id="@+id/tv_status_text"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Connected &amp; Listening"
+                    android:text="Connecting..."
                     android:textSize="13sp"
                     android:textColor="@color/text_white" />
             </LinearLayout>

@@ -72,6 +72,17 @@ public class AuthService extends Service {
 
     private volatile boolean isRunning = false;
     private volatile HttpURLConnection currentConn = null;
+    private static volatile boolean isConnected = false;
+    private static volatile String lastStatusText = "Connecting...";
+
+    public static boolean isConnectedToLaptop() {
+        return isConnected;
+    }
+
+    public static String getLastStatusText() {
+        return lastStatusText;
+    }
+
     private Thread workerThread;
     private PowerManager.WakeLock wakeLock;
     private FileServer fileServer;
@@ -222,6 +233,9 @@ public class AuthService extends Service {
     }
 
     private synchronized void checkAndAutoLoginIfLoggedOut(String reason) {
+        if (!DeviceManager.isWifiActive(AuthService.this)) {
+            return;
+        }
         long now = System.currentTimeMillis();
         if (now - lastAutoLoginAttempt < AUTO_LOGIN_COOLDOWN_MS) {
             return;
@@ -230,6 +244,9 @@ public class AuthService extends Service {
 
         new Thread(() -> {
             try {
+                if (!DeviceManager.isWifiActive(AuthService.this)) {
+                    return;
+                }
                 if (CaptivePortalManager.isInternetConnected(AuthService.this)) {
                     return;
                 }
@@ -242,9 +259,9 @@ public class AuthService extends Service {
                     new Handler(Looper.getMainLooper()).post(() -> {
                         Toast.makeText(AuthService.this, "🌐 Internet restored: " + res.message, Toast.LENGTH_SHORT).show();
                     });
-                    sendBroadcast(new Intent("com.lunarphoton.pcauthenticator.CAPTIVE_STATE_CHANGED")
-                            .setPackage(getPackageName()));
                 }
+                sendBroadcast(new Intent("com.lunarphoton.pcauthenticator.CAPTIVE_STATE_CHANGED")
+                        .setPackage(getPackageName()));
             } catch (Exception e) {
                 Log.w(TAG, "Error in auto-relogin: " + e.getMessage());
             }
@@ -827,6 +844,8 @@ public class AuthService extends Service {
     }
 
     private void broadcastStatus(boolean connected, String statusText, boolean isInternet) {
+        isConnected = connected;
+        lastStatusText = statusText;
         Intent intent = new Intent(ACTION_STATUS);
         intent.putExtra("connected", connected);
         intent.putExtra("status_text", statusText);

@@ -318,9 +318,18 @@ public class CaptivePortalManager {
                 message = message.replace("{username}", username.trim());
             }
 
-            boolean isLive = "LIVE".equalsIgnoreCase(status) || "LOGIN".equalsIgnoreCase(status)
-                    || resp.contains("signed in as") || resp.contains("LIVE") || resp.contains("success")
-                    || (code >= 200 && code < 400 && isInternetConnected(context));
+            boolean hasFailKeyword = (message != null && (message.toLowerCase().contains("limit")
+                    || message.toLowerCase().contains("invalid")
+                    || message.toLowerCase().contains("failed")
+                    || message.toLowerCase().contains("error")
+                    || message.toLowerCase().contains("denied")))
+                    || resp.toLowerCase().contains("maximum login limit")
+                    || resp.toLowerCase().contains("invalid username");
+
+            boolean isLive = !hasFailKeyword && ("LIVE".equalsIgnoreCase(status)
+                    || resp.contains("signed in as")
+                    || resp.contains("You have successfully logged in")
+                    || (status != null && status.equalsIgnoreCase("LIVE")));
 
             logDebug(context, "Portal response: HTTP " + code + ", status=" + status + ", msg=" + message + ", isLive=" + isLive);
 
@@ -651,22 +660,25 @@ public class CaptivePortalManager {
     }
 
     public static boolean isInternetConnected(Context context) {
+        if (context != null && !DeviceManager.isWifiActive(context)) {
+            return false;
+        }
         Network wifiNet = (context != null) ? DeviceManager.getWifiNetwork(context) : null;
+        if (context != null && wifiNet == null) {
+            return false;
+        }
+
         HttpURLConnection conn = null;
         try {
             URL url = new URL("http://connectivitycheck.gstatic.com/generate_204");
             if (wifiNet != null) {
-                try {
-                    conn = (HttpURLConnection) wifiNet.openConnection(url);
-                } catch (Exception ex) {
-                    conn = (HttpURLConnection) url.openConnection();
-                }
+                conn = (HttpURLConnection) wifiNet.openConnection(url);
             } else {
                 conn = (HttpURLConnection) url.openConnection();
             }
             conn.setInstanceFollowRedirects(false);
-            conn.setConnectTimeout(1800);
-            conn.setReadTimeout(1800);
+            conn.setConnectTimeout(2500);
+            conn.setReadTimeout(2500);
             int code = conn.getResponseCode();
             return code == 204;
         } catch (Exception e) {

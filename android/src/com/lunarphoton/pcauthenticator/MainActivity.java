@@ -291,6 +291,7 @@ public class MainActivity extends Activity {
             tvCaptiveActionsLink.setOnClickListener(v -> showCaptivePortalActionsDialog());
         }
         updateCaptivePortalButton();
+        updateConnectionStatus(AuthService.isConnectedToLaptop(), AuthService.getLastStatusText());
         updateApproveButtonText();
 
         // Listeners
@@ -1252,50 +1253,81 @@ public class MainActivity extends Activity {
         }
         if (!enabled) return;
 
+        boolean wifiActive = DeviceManager.isWifiActive(this);
         String user = CaptivePortalManager.getUsername(this);
+        String userLabel = user.isEmpty() ? "Portal" : user;
 
-        // Responsive local state
+        if (!wifiActive) {
+            isCaptiveLive = false;
+            if (tvCaptiveStatusBadge != null) {
+                tvCaptiveStatusBadge.setText("🔴 Wi-Fi Disconnected");
+                tvCaptiveStatusBadge.setTextColor(Color.parseColor("#ef4444"));
+            }
+            if (btnCaptivePortalToggle != null) {
+                btnCaptivePortalToggle.setEnabled(false);
+                btnCaptivePortalToggle.setText("🌐 Wi-Fi Disconnected");
+                btnCaptivePortalToggle.setBackgroundResource(R.drawable.btn_deny);
+            }
+            return;
+        }
+
+        // Apply local immediate state
         if (tvCaptiveStatusBadge != null) {
             if (isCaptiveLive) {
-                tvCaptiveStatusBadge.setText("🟢 Internet LIVE (" + (user.isEmpty() ? "Connected" : user) + ")");
+                tvCaptiveStatusBadge.setText("🟢 Internet LIVE (" + userLabel + ")");
                 tvCaptiveStatusBadge.setTextColor(Color.parseColor("#10b981"));
             } else {
-                tvCaptiveStatusBadge.setText("🔴 Disconnected (" + (user.isEmpty() ? "No user" : user) + ")");
+                tvCaptiveStatusBadge.setText("🔴 Disconnected (" + userLabel + ")");
                 tvCaptiveStatusBadge.setTextColor(Color.parseColor("#ef4444"));
             }
         }
         if (btnCaptivePortalToggle != null) {
             btnCaptivePortalToggle.setEnabled(true);
             if (isCaptiveLive) {
-                btnCaptivePortalToggle.setText("🚪 Logout of Internet (" + (user.isEmpty() ? "Connected" : user) + ")");
+                btnCaptivePortalToggle.setText("🚪 Logout of Internet (" + userLabel + ")");
                 btnCaptivePortalToggle.setBackgroundResource(R.drawable.btn_deny);
             } else {
-                btnCaptivePortalToggle.setText("🌐 Login to Internet (" + (user.isEmpty() ? "Portal" : user) + ")");
+                btnCaptivePortalToggle.setText("🌐 Login to Internet (" + userLabel + ")");
                 btnCaptivePortalToggle.setBackgroundResource(R.drawable.btn_approve);
             }
         }
 
-        // Real-time background network check to adapt automatically on ANY Wi-Fi:
+        // Real-time Wi-Fi connectivity probe
         new Thread(() -> {
             boolean live = CaptivePortalManager.isInternetConnected(MainActivity.this);
             isCaptiveLive = live;
             runOnUiThread(() -> {
+                boolean currentWifi = DeviceManager.isWifiActive(MainActivity.this);
+                if (!currentWifi) {
+                    isCaptiveLive = false;
+                    if (tvCaptiveStatusBadge != null) {
+                        tvCaptiveStatusBadge.setText("🔴 Wi-Fi Disconnected");
+                        tvCaptiveStatusBadge.setTextColor(Color.parseColor("#ef4444"));
+                    }
+                    if (btnCaptivePortalToggle != null) {
+                        btnCaptivePortalToggle.setEnabled(false);
+                        btnCaptivePortalToggle.setText("🌐 Wi-Fi Disconnected");
+                        btnCaptivePortalToggle.setBackgroundResource(R.drawable.btn_deny);
+                    }
+                    return;
+                }
+
                 if (tvCaptiveStatusBadge != null) {
                     if (live) {
-                        tvCaptiveStatusBadge.setText("🟢 Internet LIVE (" + (user.isEmpty() ? "Connected" : user) + ")");
+                        tvCaptiveStatusBadge.setText("🟢 Internet LIVE (" + userLabel + ")");
                         tvCaptiveStatusBadge.setTextColor(Color.parseColor("#10b981"));
                     } else {
-                        tvCaptiveStatusBadge.setText("🔴 Disconnected (" + (user.isEmpty() ? "No user" : user) + ")");
+                        tvCaptiveStatusBadge.setText("🔴 Disconnected (" + userLabel + ")");
                         tvCaptiveStatusBadge.setTextColor(Color.parseColor("#ef4444"));
                     }
                 }
                 if (btnCaptivePortalToggle != null) {
                     btnCaptivePortalToggle.setEnabled(true);
                     if (live) {
-                        btnCaptivePortalToggle.setText("🚪 Logout of Internet (" + (user.isEmpty() ? "Connected" : user) + ")");
+                        btnCaptivePortalToggle.setText("🚪 Logout of Internet (" + userLabel + ")");
                         btnCaptivePortalToggle.setBackgroundResource(R.drawable.btn_deny);
                     } else {
-                        btnCaptivePortalToggle.setText("🌐 Login to Internet (" + (user.isEmpty() ? "Portal" : user) + ")");
+                        btnCaptivePortalToggle.setText("🌐 Login to Internet (" + userLabel + ")");
                         btnCaptivePortalToggle.setBackgroundResource(R.drawable.btn_approve);
                     }
                 }
@@ -3154,6 +3186,7 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         updateCaptivePortalButton();
+        updateConnectionStatus(AuthService.isConnectedToLaptop(), AuthService.getLastStatusText());
         if (RingManager.isRinging()) {
             RingManager.stopAlarm(this);
             Toast.makeText(this, "🔔 Alarm stopped", Toast.LENGTH_SHORT).show();
