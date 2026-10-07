@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/card_bg"
+    android:padding="14dp"
+    android:layout_marginBottom="12dp">
+
+    <!-- Title & Badge Row -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="4dp">
+
+        <TextView
+            android:id="@+id/tv_term_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Terminal Title"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_white"
+            android:singleLine="true"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/tv_term_badge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="claude (pts/0)"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:textColor="@color/accent_cyan"
+            android:background="@drawable/badge_wifi"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp" />
+    </LinearLayout>
+
+    <!-- Working Directory -->
+    <TextView
+        android:id="@+id/tv_term_cwd"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="📁 /home/user/project"
+        android:textSize="12sp"
+        android:textColor="@color/text_muted"
+        android:singleLine="true"
+        android:ellipsize="middle"
+        android:layout_marginBottom="8dp" />
+
+    <!-- Terminal Output Preview -->
+    <TextView
+        android:id="@+id/tv_term_preview"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="terminal preview output..."
+        android:typeface="monospace"
+        android:textSize="11sp"
+        android:textColor="#00FF66"
+        android:background="#0D1117"
+        android:padding="8dp"
+        android:maxLines="3"
+        android:ellipsize="end"
+        android:layout_marginBottom="10dp" />
+
+    <!-- Action Button -->
+    <Button
+        android:id="@+id/btn_term_open"
+        android:layout_width="match_parent"
+        android:layout_height="38dp"
+        android:text="⚡ Open &amp; Interact Live"
+        android:textSize="13sp"
+        android:textStyle="bold"
+        android:textColor="@color/text_white"
+        android:background="@drawable/btn_approve" />
+</LinearLayout>

@@ -821,6 +821,176 @@ def set_kde_clipboard(text):
     except Exception:
         return False
 
+# --- Terminal Management Functions ---
+def get_open_terminals():
+    terminals = []
+    seen_ttys = set()
+    try:
+        q_res = subprocess.run(['qdbus6'], capture_output=True, text=True, timeout=2)
+        konsole_svcs = [l.strip() for l in q_res.stdout.splitlines() if 'org.kde.konsole' in l]
+        for svc in konsole_svcs:
+            try:
+                s_res = subprocess.run(['qdbus6', svc, '/Windows/1', 'org.kde.konsole.Window.sessionList'], capture_output=True, text=True, timeout=1)
+                session_ids = [s.strip() for s in s_res.stdout.splitlines() if s.strip().isdigit()]
+                if not session_ids:
+                    intro = subprocess.run(['qdbus6', svc, '/Sessions', 'org.freedesktop.DBus.Introspectable.Introspect'], capture_output=True, text=True, timeout=1)
+                    session_ids = re.findall(r'<node name="(\d+)"', intro.stdout)
+                
+                for sid in session_ids:
+                    spath = f'/Sessions/{sid}'
+                    t_res = subprocess.run(['qdbus6', svc, spath, 'org.kde.konsole.Session.title', '1'], capture_output=True, text=True, timeout=1)
+                    title = t_res.stdout.strip()
+                    
+                    fg_res = subprocess.run(['qdbus6', svc, spath, 'org.kde.konsole.Session.foregroundProcessId'], capture_output=True, text=True, timeout=1)
+                    fg_pid = fg_res.stdout.strip()
+                    
+                    sh_res = subprocess.run(['qdbus6', svc, spath, 'org.kde.konsole.Session.processId'], capture_output=True, text=True, timeout=1)
+                    sh_pid = sh_res.stdout.strip()
+                    
+                    cwd = ''
+                    tty = ''
+                    if sh_pid:
+                        try:
+                            cwd = os.readlink(f'/proc/{sh_pid}/cwd')
+                        except Exception:
+                            pass
+                        try:
+                            fd0 = os.readlink(f'/proc/{sh_pid}/fd/0')
+                            if 'pts' in fd0:
+                                tty = os.path.basename(fd0)
+                                seen_ttys.add(tty)
+                        except Exception:
+                            pass
+                            
+                    fg_comm = ''
+                    if fg_pid and os.path.exists(f'/proc/{fg_pid}/comm'):
+                        try:
+                            with open(f'/proc/{fg_pid}/comm') as f:
+                                fg_comm = f.read().strip()
+                        except Exception:
+                            pass
+                    if not fg_comm and sh_pid and os.path.exists(f'/proc/{sh_pid}/comm'):
+                        try:
+                            with open(f'/proc/{sh_pid}/comm') as f:
+                                fg_comm = f.read().strip()
+                        except Exception:
+                            pass
+                            
+                    txt_res = subprocess.run(['qdbus6', svc, spath, 'org.kde.konsole.Session.getDisplayedText', '0', '6'], capture_output=True, text=True, timeout=1)
+                    preview = txt_res.stdout.strip()
+                    
+                    terminals.append({
+                        'id': f'{svc}:{sid}',
+                        'type': 'konsole',
+                        'service': svc,
+                        'session_id': sid,
+                        'title': title if title else f'Konsole Session {sid}',
+                        'command': fg_comm if fg_comm else 'shell',
+                        'pid': int(fg_pid) if fg_pid.isdigit() else (int(sh_pid) if sh_pid.isdigit() else 0),
+                        'cwd': cwd,
+                        'tty': tty,
+                        'preview': preview
+                    })
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # Query additional terminals on pts (tmux, kitty, alacritty, etc.)
+    try:
+        ps_out = subprocess.run(['ps', '-eo', 'pid,tty,comm,args'], capture_output=True, text=True, timeout=2)
+        for line in ps_out.stdout.splitlines()[1:]:
+            parts = line.strip().split(None, 3)
+            if len(parts) >= 3:
+                pid, tty, comm = parts[0], parts[1], parts[2]
+                args = parts[3] if len(parts) > 3 else comm
+                if tty.startswith('pts/') and tty not in seen_ttys and comm in ('bash', 'zsh', 'fish', 'sh', 'tmux', 'kitty', 'alacritty'):
+                    seen_ttys.add(tty)
+                    cwd = ''
+                    try:
+                        cwd = os.readlink(f'/proc/{pid}/cwd')
+                    except Exception:
+                        pass
+                    terminals.append({
+                        'id': f'pty:{tty}',
+                        'type': 'pty',
+                        'service': '',
+                        'session_id': tty,
+                        'title': f'{comm} on {tty}',
+                        'command': comm,
+                        'pid': int(pid) if pid.isdigit() else 0,
+                        'cwd': cwd,
+                        'tty': tty,
+                        'preview': args
+                    })
+    except Exception:
+        pass
+
+    return terminals
+
+def read_terminal(term_id, max_lines=120):
+    if ':' in term_id and 'org.kde.konsole' in term_id:
+        svc, sid = term_id.split(':', 1)
+        spath = f'/Sessions/{sid}'
+        t_res = subprocess.run(['qdbus6', svc, spath, 'org.kde.konsole.Session.title', '1'], capture_output=True, text=True, timeout=1)
+        title = t_res.stdout.strip()
+        txt_res = subprocess.run(['qdbus6', svc, spath, 'org.kde.konsole.Session.getAllDisplayedText'], capture_output=True, text=True, timeout=2)
+        lines = txt_res.stdout.splitlines()
+        if len(lines) > max_lines:
+            lines = lines[-max_lines:]
+        return {
+            'status': 'ok',
+            'id': term_id,
+            'title': title,
+            'text': '\n'.join(lines)
+        }
+    return {'status': 'error', 'message': 'Terminal not found or inaccessible'}
+
+def write_terminal(term_id, text):
+    if ':' in term_id and 'org.kde.konsole' in term_id:
+        svc, sid = term_id.split(':', 1)
+        spath = f'/Sessions/{sid}'
+        subprocess.run(['qdbus6', svc, spath, 'org.kde.konsole.Session.sendText', text], capture_output=True, text=True, timeout=2)
+        return {'status': 'ok'}
+    return {'status': 'error', 'message': 'Terminal not found or inaccessible'}
+
+def send_terminal_key(term_id, key_name):
+    KEY_MAP = {
+        'ctrl_c': '\x03',
+        'ctrl_d': '\x04',
+        'ctrl_z': '\x1a',
+        'tab': '\t',
+        'up': '\x1b[A',
+        'down': '\x1b[B',
+        'enter': '\n',
+        'escape': '\x1b'
+    }
+    char = KEY_MAP.get(key_name.lower())
+    if char:
+        return write_terminal(term_id, char)
+    return {'status': 'error', 'message': f'Unsupported key {key_name}'}
+
+def spawn_new_terminal(workdir=''):
+    try:
+        q_res = subprocess.run(['qdbus6'], capture_output=True, text=True, timeout=1)
+        konsole_svcs = [l.strip() for l in q_res.stdout.splitlines() if 'org.kde.konsole' in l]
+        if konsole_svcs:
+            svc = konsole_svcs[0]
+            if workdir:
+                subprocess.run(['qdbus6', svc, '/Windows/1', 'org.kde.konsole.Window.newSession', '', workdir], capture_output=True, text=True, timeout=2)
+            else:
+                subprocess.run(['qdbus6', svc, '/Windows/1', 'org.kde.konsole.Window.newSession'], capture_output=True, text=True, timeout=2)
+            return {'status': 'ok', 'action': 'new_tab'}
+        else:
+            args = ['konsole']
+            if workdir:
+                args += ['--workdir', workdir]
+            subprocess.Popen(args)
+            return {'status': 'ok', 'action': 'new_window'}
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+
 def start_clipboard_monitor(auth_mgr):
     def _monitor():
         global _last_pc_clipboard
@@ -1986,6 +2156,31 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             self.send_json(get_pc_system_status())
             return
 
+        elif path == '/api/terminals/list':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
+            self.send_json({"status": "ok", "terminals": get_open_terminals()})
+            return
+
+        elif path == '/api/terminals/read':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
+            term_id = qs.get('id', [''])[0]
+            lines = qs.get('lines', ['120'])[0]
+            try:
+                max_lines = int(lines)
+            except Exception:
+                max_lines = 120
+            res = read_terminal(term_id, max_lines)
+            self.send_json(res)
+            return
+
         elif path == '/api/screen/screenshot':
             cfg = load_config()
             client_info, token = authenticate_client(self, cfg)
@@ -2781,6 +2976,42 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             cmd = body.get('command', '')
             success = send_mpris_command(cmd)
             self.send_json({"status": "ok" if success else "failed"})
+
+        # Terminal Endpoints
+        elif path == '/api/terminals/write':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
+            term_id = body.get('id', '')
+            text = body.get('text', '')
+            res = write_terminal(term_id, text)
+            self.send_json(res)
+            return
+
+        elif path == '/api/terminals/key':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
+            term_id = body.get('id', '')
+            key_name = body.get('key', '')
+            res = send_terminal_key(term_id, key_name)
+            self.send_json(res)
+            return
+
+        elif path == '/api/terminals/new':
+            cfg = load_config()
+            client_info, token = authenticate_client(self, cfg)
+            if not client_info:
+                self.send_json({"error": "unauthorized"}, status=401)
+                return
+            workdir = body.get('cwd', '')
+            res = spawn_new_terminal(workdir)
+            self.send_json(res)
+            return
 
         # 7. Ping (Ring PC)
         elif path == '/api/ping':

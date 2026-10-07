@@ -86,6 +86,44 @@ public class NetworkUtils {
         return null;
     }
 
+    public static String httpPostJsonWithAuth(String urlStr, String authToken, String jsonBody, int timeoutMs) {
+        HttpURLConnection conn = null;
+        try {
+            URL url = new URL(urlStr);
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setConnectTimeout(timeoutMs);
+            conn.setReadTimeout(timeoutMs);
+            conn.setDoOutput(true);
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setRequestProperty("Accept", "application/json");
+            applyTunnelHeaders(conn);
+            if (authToken != null && !authToken.isEmpty()) {
+                conn.setRequestProperty("Authorization", "Bearer " + authToken);
+            }
+
+            if (jsonBody != null && !jsonBody.isEmpty()) {
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write(jsonBody.getBytes("UTF-8"));
+                }
+            } else {
+                conn.setFixedLengthStreamingMode(0);
+            }
+
+            int code = conn.getResponseCode();
+            if (code >= 200 && code < 300) {
+                return readStream(conn.getInputStream());
+            } else if (conn.getErrorStream() != null) {
+                return readStream(conn.getErrorStream());
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+        return null;
+    }
+
     public static boolean httpPostWithAuth(String urlStr, String authToken, String secretKey, String sessionId, String action, int timeoutMs) {
         HttpURLConnection conn = null;
         try {

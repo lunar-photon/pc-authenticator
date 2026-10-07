@@ -29,15 +29,20 @@ import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.WindowManager;
+import android.view.GestureDetector;
+import android.view.MotionEvent;
+import android.view.inputmethod.EditorInfo;
 import android.text.InputType;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.widget.ViewFlipper;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -137,6 +142,45 @@ public class MainActivity extends Activity {
     private Button btnAddManual;
     private TextView tvScanStatus;
     private LinearLayout containerDevices;
+
+    // --- Live Terminals Panel ---
+    private ViewFlipper mainViewFlipper;
+    private TextView tabBtnDashboard;
+    private TextView tabBtnTerminals;
+    private Button btnOpenTerminalsAction;
+    private GestureDetector swipeGestureDetector;
+
+    private Button btnTerminalsRefresh;
+    private Button btnTerminalsNew;
+    private LinearLayout layoutTermChips;
+    private ScrollView scrollTermList;
+    private LinearLayout containerTerminalsList;
+    private View layoutTerminalsEmpty;
+
+    private View layoutTerminalInteractive;
+    private Button btnInteractiveBack;
+    private TextView tvInteractiveTitle;
+    private TextView tvInteractiveStatus;
+    private Button btnInteractiveRefresh;
+    private TextView tvInteractiveCwd;
+    private ScrollView scrollTermScreen;
+    private TextView tvTermScreen;
+
+    private Button btnKeyCtrlC;
+    private Button btnKeyTab;
+    private Button btnKeyUp;
+    private Button btnKeyDown;
+    private Button btnKeyCtrlD;
+    private Button btnKeyClear;
+
+    private EditText etTermInput;
+    private Button btnTermSend;
+
+    private String activeTerminalId = null;
+    private String activeTerminalTitle = "";
+    private String activeTerminalCwd = "";
+    private Handler terminalHandler = new Handler(Looper.getMainLooper());
+    private Runnable terminalPollRunnable = null;
 
     private CountDownTimer countDownTimer;
     private Handler pollHandler = new Handler(Looper.getMainLooper());
@@ -267,6 +311,8 @@ public class MainActivity extends Activity {
         if (btnSearchFilesAction != null) {
             btnSearchFilesAction.setOnClickListener(v -> showFileSearchDialog());
         }
+
+        initTerminalsPanel();
 
         // Header Settings Button
         btnSettings = findViewById(R.id.btn_settings);
@@ -3282,6 +3328,7 @@ public class MainActivity extends Activity {
         if (pollRunnable != null) {
             pollHandler.removeCallbacks(pollRunnable);
         }
+        stopTerminalStreamTimer();
     }
 
     @Override
@@ -3298,10 +3345,412 @@ public class MainActivity extends Activity {
         if (countDownTimer != null) {
             countDownTimer.cancel();
         }
+        stopTerminalStreamTimer();
         try {
             unregisterReceiver(serviceReceiver);
         } catch (Exception ignored) {}
         super.onDestroy();
+    }
+
+    // --- Live Terminals Panel Implementation ---
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        if (swipeGestureDetector != null) {
+            swipeGestureDetector.onTouchEvent(ev);
+        }
+        return super.dispatchTouchEvent(ev);
+    }
+
+    private void initTerminalsPanel() {
+        mainViewFlipper = findViewById(R.id.main_view_flipper);
+        tabBtnDashboard = findViewById(R.id.tab_btn_dashboard);
+        tabBtnTerminals = findViewById(R.id.tab_btn_terminals);
+        btnOpenTerminalsAction = findViewById(R.id.btn_open_terminals_action);
+
+        if (tabBtnDashboard != null) {
+            tabBtnDashboard.setOnClickListener(v -> switchToPanel(0));
+        }
+        if (tabBtnTerminals != null) {
+            tabBtnTerminals.setOnClickListener(v -> switchToPanel(1));
+        }
+        if (btnOpenTerminalsAction != null) {
+            btnOpenTerminalsAction.setOnClickListener(v -> switchToPanel(1));
+        }
+
+        // Swipe detector: swipe left to open Terminals, swipe right to return to Dashboard
+        swipeGestureDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
+            private static final int SWIPE_MIN_DISTANCE = 90;
+            private static final int SWIPE_THRESHOLD_VELOCITY = 150;
+
+            @Override
+            public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
+                if (e1 == null || e2 == null) return false;
+                float diffX = e2.getX() - e1.getX();
+                float diffY = e2.getY() - e1.getY();
+                if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > SWIPE_MIN_DISTANCE && Math.abs(velocityX) > SWIPE_THRESHOLD_VELOCITY) {
+                    if (diffX < 0) {
+                        // Swipe Left: Dashboard -> Terminals
+                        if (mainViewFlipper != null && mainViewFlipper.getDisplayedChild() == 0) {
+                            switchToPanel(1);
+                            return true;
+                        }
+                    } else if (diffX > 0) {
+                        // Swipe Right: Terminals -> Dashboard
+                        if (mainViewFlipper != null && mainViewFlipper.getDisplayedChild() == 1) {
+                            switchToPanel(0);
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }
+        });
+
+        // Terminals Panel Views
+        btnTerminalsRefresh = findViewById(R.id.btn_terminals_refresh);
+        btnTerminalsNew = findViewById(R.id.btn_terminals_new);
+        layoutTermChips = findViewById(R.id.layout_term_chips);
+        scrollTermList = findViewById(R.id.scroll_term_list);
+        containerTerminalsList = findViewById(R.id.container_terminals_list);
+        layoutTerminalsEmpty = findViewById(R.id.layout_terminals_empty);
+
+        layoutTerminalInteractive = findViewById(R.id.layout_terminal_interactive);
+        btnInteractiveBack = findViewById(R.id.btn_interactive_back);
+        tvInteractiveTitle = findViewById(R.id.tv_interactive_title);
+        tvInteractiveStatus = findViewById(R.id.tv_interactive_status);
+        btnInteractiveRefresh = findViewById(R.id.btn_interactive_refresh);
+        tvInteractiveCwd = findViewById(R.id.tv_interactive_cwd);
+        scrollTermScreen = findViewById(R.id.scroll_term_screen);
+        tvTermScreen = findViewById(R.id.tv_term_screen);
+
+        btnKeyCtrlC = findViewById(R.id.btn_key_ctrl_c);
+        btnKeyTab = findViewById(R.id.btn_key_tab);
+        btnKeyUp = findViewById(R.id.btn_key_up);
+        btnKeyDown = findViewById(R.id.btn_key_down);
+        btnKeyCtrlD = findViewById(R.id.btn_key_ctrl_d);
+        btnKeyClear = findViewById(R.id.btn_key_clear);
+
+        etTermInput = findViewById(R.id.et_term_input);
+        btnTermSend = findViewById(R.id.btn_term_send);
+
+        if (btnTerminalsRefresh != null) {
+            btnTerminalsRefresh.setOnClickListener(v -> loadTerminalsList());
+        }
+        if (btnTerminalsNew != null) {
+            btnTerminalsNew.setOnClickListener(v -> spawnNewTerminal());
+        }
+        if (btnInteractiveBack != null) {
+            btnInteractiveBack.setOnClickListener(v -> closeTerminalInteractive());
+        }
+        if (btnInteractiveRefresh != null) {
+            btnInteractiveRefresh.setOnClickListener(v -> pollActiveTerminalOutput());
+        }
+
+        if (btnKeyCtrlC != null) btnKeyCtrlC.setOnClickListener(v -> sendTerminalKey("ctrl_c"));
+        if (btnKeyCtrlD != null) btnKeyCtrlD.setOnClickListener(v -> sendTerminalKey("ctrl_d"));
+        if (btnKeyTab != null) btnKeyTab.setOnClickListener(v -> sendTerminalKey("tab"));
+        if (btnKeyUp != null) btnKeyUp.setOnClickListener(v -> sendTerminalKey("up"));
+        if (btnKeyDown != null) btnKeyDown.setOnClickListener(v -> sendTerminalKey("down"));
+        if (btnKeyClear != null) {
+            btnKeyClear.setOnClickListener(v -> {
+                if (tvTermScreen != null) tvTermScreen.setText("");
+            });
+        }
+
+        if (btnTermSend != null) {
+            btnTermSend.setOnClickListener(v -> handleSendTerminalInput());
+        }
+        if (etTermInput != null) {
+            etTermInput.setOnEditorActionListener((v, actionId, event) -> {
+                if (actionId == EditorInfo.IME_ACTION_SEND || actionId == EditorInfo.IME_ACTION_DONE) {
+                    handleSendTerminalInput();
+                    return true;
+                }
+                return false;
+            });
+        }
+    }
+
+    private void switchToPanel(int panelIndex) {
+        if (mainViewFlipper == null || mainViewFlipper.getDisplayedChild() == panelIndex) return;
+        if (panelIndex == 1) {
+            mainViewFlipper.setInAnimation(this, R.anim.slide_in_right);
+            mainViewFlipper.setOutAnimation(this, R.anim.slide_out_left);
+            mainViewFlipper.setDisplayedChild(1);
+            if (tabBtnDashboard != null) {
+                tabBtnDashboard.setTextColor(getColor(R.color.text_muted));
+                tabBtnDashboard.setBackground(null);
+            }
+            if (tabBtnTerminals != null) {
+                tabBtnTerminals.setTextColor(getColor(R.color.accent_cyan));
+                tabBtnTerminals.setBackgroundResource(R.drawable.badge_wifi);
+            }
+            loadTerminalsList();
+        } else {
+            mainViewFlipper.setInAnimation(this, R.anim.slide_in_left);
+            mainViewFlipper.setOutAnimation(this, R.anim.slide_out_right);
+            mainViewFlipper.setDisplayedChild(0);
+            if (tabBtnDashboard != null) {
+                tabBtnDashboard.setTextColor(getColor(R.color.accent_cyan));
+                tabBtnDashboard.setBackgroundResource(R.drawable.badge_wifi);
+            }
+            if (tabBtnTerminals != null) {
+                tabBtnTerminals.setTextColor(getColor(R.color.text_muted));
+                tabBtnTerminals.setBackground(null);
+            }
+            stopTerminalStreamTimer();
+        }
+    }
+
+    private void loadTerminalsList() {
+        PairedDevice active = DeviceManager.getActiveDevice(this);
+        if (active == null) {
+            Toast.makeText(this, "No active PC connected", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        new Thread(() -> {
+            try {
+                String url = active.getBaseUrl() + "/api/terminals/list";
+                String res = NetworkUtils.httpGetWithAuth(url, active.authToken, 4000);
+                if (res != null) {
+                    JSONObject obj = new JSONObject(res);
+                    if ("ok".equals(obj.optString("status"))) {
+                        JSONArray terms = obj.optJSONArray("terminals");
+                        runOnUiThread(() -> renderTerminalsList(terms));
+                        return;
+                    }
+                }
+                runOnUiThread(() -> {
+                    if (containerTerminalsList != null) containerTerminalsList.removeAllViews();
+                    if (layoutTerminalsEmpty != null) layoutTerminalsEmpty.setVisibility(View.VISIBLE);
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    Toast.makeText(MainActivity.this, "Could not fetch terminals: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                });
+            }
+        }).start();
+    }
+
+    private void renderTerminalsList(JSONArray terms) {
+        if (terms == null || terms.length() == 0) {
+            if (tabBtnTerminals != null) tabBtnTerminals.setText("💻 Terminals (0)");
+            if (containerTerminalsList != null) containerTerminalsList.removeAllViews();
+            if (layoutTermChips != null) layoutTermChips.removeAllViews();
+            if (layoutTerminalsEmpty != null) layoutTerminalsEmpty.setVisibility(View.VISIBLE);
+            return;
+        }
+
+        if (tabBtnTerminals != null) tabBtnTerminals.setText("💻 Terminals (" + terms.length() + ")");
+        if (layoutTerminalsEmpty != null) layoutTerminalsEmpty.setVisibility(View.GONE);
+        if (containerTerminalsList != null) containerTerminalsList.removeAllViews();
+        if (layoutTermChips != null) layoutTermChips.removeAllViews();
+
+        LayoutInflater inflater = LayoutInflater.from(this);
+
+        for (int i = 0; i < terms.length(); i++) {
+            JSONObject t = terms.optJSONObject(i);
+            if (t == null) continue;
+
+            final String id = t.optString("id");
+            final String title = t.optString("title", "Terminal " + (i + 1));
+            final String command = t.optString("command", "shell");
+            final String cwd = t.optString("cwd", "");
+            final String tty = t.optString("tty", "");
+            final int pid = t.optInt("pid", 0);
+            final String preview = t.optString("preview", "");
+
+            // 1. Add quick switch Chip
+            TextView chip = new TextView(this);
+            chip.setText("🟢 " + command + (tty.isEmpty() ? "" : " (" + tty + ")"));
+            chip.setTextSize(11);
+            chip.setTextColor(getColor(R.color.text_white));
+            chip.setBackgroundResource(R.drawable.card_bg);
+            chip.setPadding(24, 12, 24, 12);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            lp.setMargins(0, 0, 16, 0);
+            chip.setLayoutParams(lp);
+            chip.setOnClickListener(v -> openTerminalInteractive(id, title, cwd));
+            layoutTermChips.addView(chip);
+
+            // 2. Add Terminal Card to container
+            View itemView = inflater.inflate(R.layout.item_terminal, containerTerminalsList, false);
+            TextView tvTitle = itemView.findViewById(R.id.tv_term_title);
+            TextView tvBadge = itemView.findViewById(R.id.tv_term_badge);
+            TextView tvCwd = itemView.findViewById(R.id.tv_term_cwd);
+            TextView tvPrev = itemView.findViewById(R.id.tv_term_preview);
+            Button btnOpen = itemView.findViewById(R.id.btn_term_open);
+
+            if (tvTitle != null) tvTitle.setText(title);
+            if (tvBadge != null) tvBadge.setText(command + (tty.isEmpty() ? (pid > 0 ? " [pid " + pid + "]" : "") : " (" + tty + ")"));
+            if (tvCwd != null) {
+                if (cwd.isEmpty()) {
+                    tvCwd.setVisibility(View.GONE);
+                } else {
+                    tvCwd.setVisibility(View.VISIBLE);
+                    tvCwd.setText("📁 " + cwd);
+                }
+            }
+            if (tvPrev != null) {
+                if (preview.isEmpty()) {
+                    tvPrev.setVisibility(View.GONE);
+                } else {
+                    tvPrev.setVisibility(View.VISIBLE);
+                    tvPrev.setText(preview);
+                }
+            }
+            if (btnOpen != null) {
+                btnOpen.setOnClickListener(v -> openTerminalInteractive(id, title, cwd));
+            }
+
+            containerTerminalsList.addView(itemView);
+        }
+    }
+
+    private void openTerminalInteractive(String termId, String title, String cwd) {
+        activeTerminalId = termId;
+        activeTerminalTitle = title;
+        activeTerminalCwd = cwd;
+
+        if (scrollTermList != null) scrollTermList.setVisibility(View.GONE);
+        if (layoutTerminalInteractive != null) layoutTerminalInteractive.setVisibility(View.VISIBLE);
+
+        if (tvInteractiveTitle != null) tvInteractiveTitle.setText(title);
+        if (tvInteractiveCwd != null) {
+            tvInteractiveCwd.setVisibility(cwd.isEmpty() ? View.GONE : View.VISIBLE);
+            tvInteractiveCwd.setText(cwd.isEmpty() ? "" : "📁 " + cwd);
+        }
+        if (tvTermScreen != null) tvTermScreen.setText("⚡ Connecting to " + title + "...");
+
+        pollActiveTerminalOutput();
+        startTerminalStreamTimer();
+    }
+
+    private void closeTerminalInteractive() {
+        stopTerminalStreamTimer();
+        activeTerminalId = null;
+        if (layoutTerminalInteractive != null) layoutTerminalInteractive.setVisibility(View.GONE);
+        if (scrollTermList != null) scrollTermList.setVisibility(View.VISIBLE);
+        loadTerminalsList();
+    }
+
+    private void startTerminalStreamTimer() {
+        stopTerminalStreamTimer();
+        terminalPollRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (activeTerminalId != null && layoutTerminalInteractive != null && layoutTerminalInteractive.getVisibility() == View.VISIBLE) {
+                    pollActiveTerminalOutput();
+                    terminalHandler.postDelayed(this, 1500);
+                }
+            }
+        };
+        terminalHandler.postDelayed(terminalPollRunnable, 1500);
+    }
+
+    private void stopTerminalStreamTimer() {
+        if (terminalPollRunnable != null) {
+            terminalHandler.removeCallbacks(terminalPollRunnable);
+            terminalPollRunnable = null;
+        }
+    }
+
+    private void pollActiveTerminalOutput() {
+        if (activeTerminalId == null) return;
+        PairedDevice active = DeviceManager.getActiveDevice(this);
+        if (active == null) return;
+
+        new Thread(() -> {
+            try {
+                String encodedId = java.net.URLEncoder.encode(activeTerminalId, "UTF-8");
+                String url = active.getBaseUrl() + "/api/terminals/read?id=" + encodedId + "&lines=140";
+                String res = NetworkUtils.httpGetWithAuth(url, active.authToken, 3000);
+                if (res != null) {
+                    JSONObject obj = new JSONObject(res);
+                    if ("ok".equals(obj.optString("status"))) {
+                        final String text = obj.optString("text", "");
+                        runOnUiThread(() -> {
+                            if (tvTermScreen != null) {
+                                tvTermScreen.setText(text.isEmpty() ? "(Empty terminal)" : text);
+                            }
+                            if (scrollTermScreen != null) {
+                                scrollTermScreen.post(() -> scrollTermScreen.fullScroll(View.FOCUS_DOWN));
+                            }
+                        });
+                    }
+                }
+            } catch (Exception ignored) {}
+        }).start();
+    }
+
+    private void handleSendTerminalInput() {
+        if (activeTerminalId == null || etTermInput == null) return;
+        String cmd = etTermInput.getText().toString();
+        etTermInput.setText("");
+        sendTerminalRawText(cmd + "\n");
+    }
+
+    private void sendTerminalRawText(String text) {
+        if (activeTerminalId == null) return;
+        PairedDevice active = DeviceManager.getActiveDevice(this);
+        if (active == null) return;
+
+        new Thread(() -> {
+            try {
+                String url = active.getBaseUrl() + "/api/terminals/write";
+                JSONObject req = new JSONObject();
+                req.put("id", activeTerminalId);
+                req.put("text", text);
+                NetworkUtils.httpPostJsonWithAuth(url, active.authToken, req.toString(), 3000);
+                pollActiveTerminalOutput();
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Send error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+            }
+        }).start();
+    }
+
+    private void sendTerminalKey(String keyName) {
+        if (activeTerminalId == null) return;
+        PairedDevice active = DeviceManager.getActiveDevice(this);
+        if (active == null) return;
+
+        new Thread(() -> {
+            try {
+                String url = active.getBaseUrl() + "/api/terminals/key";
+                JSONObject req = new JSONObject();
+                req.put("id", activeTerminalId);
+                req.put("key", keyName);
+                NetworkUtils.httpPostJsonWithAuth(url, active.authToken, req.toString(), 3000);
+                pollActiveTerminalOutput();
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Key error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+            }
+        }).start();
+    }
+
+    private void spawnNewTerminal() {
+        PairedDevice active = DeviceManager.getActiveDevice(this);
+        if (active == null) {
+            Toast.makeText(this, "No active PC connected", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        Toast.makeText(this, "⚡ Spawning new terminal on PC...", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            try {
+                String url = active.getBaseUrl() + "/api/terminals/new";
+                JSONObject req = new JSONObject();
+                String res = NetworkUtils.httpPostJsonWithAuth(url, active.authToken, req.toString(), 4000);
+                runOnUiThread(() -> {
+                    Toast.makeText(MainActivity.this, "➕ New terminal opened on laptop!", Toast.LENGTH_SHORT).show();
+                    loadTerminalsList();
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Spawn error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+            }
+        }).start();
     }
 }
 

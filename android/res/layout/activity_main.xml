@@ -1,9 +1,64 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg_dark"
-    android:fillViewport="true">
+    android:orientation="vertical"
+    android:background="@color/bg_dark">
+
+    <!-- Top Mode Navigation Bar (Swipe or Tap) -->
+    <LinearLayout
+        android:id="@+id/layout_top_tabs"
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
+        android:orientation="horizontal"
+        android:background="#131d33"
+        android:gravity="center_vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp">
+
+        <TextView
+            android:id="@+id/tab_btn_dashboard"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="🔗 Dashboard"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/accent_cyan"
+            android:background="@drawable/badge_wifi" />
+
+        <View
+            android:layout_width="8dp"
+            android:layout_height="match_parent" />
+
+        <TextView
+            android:id="@+id/tab_btn_terminals"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="💻 Terminals"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_muted" />
+    </LinearLayout>
+
+    <ViewFlipper
+        android:id="@+id/main_view_flipper"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <!-- Page 1: Dashboard ScrollView -->
+        <ScrollView
+            android:id="@+id/scroll_dashboard"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@color/bg_dark"
+            android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -392,6 +447,18 @@
                     android:background="@drawable/card_bg"
                     android:layout_marginStart="4dp" />
             </LinearLayout>
+
+            <!-- Terminal Quick Action -->
+            <Button
+                android:id="@+id/btn_open_terminals_action"
+                android:layout_width="match_parent"
+                android:layout_height="42dp"
+                android:text="💻 Live Terminals (Swipe ➔)"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="@color/accent_cyan"
+                android:background="@drawable/card_bg"
+                android:layout_marginTop="6dp" />
         </LinearLayout>
 
         <!-- Quick Actions & Tools Card -->
@@ -849,3 +916,350 @@
 
     </LinearLayout>
 </ScrollView>
+
+        <!-- Page 2: Live Laptop Terminals Hub -->
+        <LinearLayout
+            android:id="@+id/panel_terminals"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:background="@color/bg_dark"
+            android:padding="12dp">
+
+            <!-- Terminals Top Header -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="10dp">
+
+                <TextView
+                    android:id="@+id/tv_terminals_header"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="💻 Laptop Terminals"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text_white" />
+
+                <Button
+                    android:id="@+id/btn_terminals_refresh"
+                    android:layout_width="38dp"
+                    android:layout_height="36dp"
+                    android:text="🔄"
+                    android:textSize="14sp"
+                    android:textColor="@color/text_white"
+                    android:background="@drawable/card_bg"
+                    android:layout_marginEnd="6dp" />
+
+                <Button
+                    android:id="@+id/btn_terminals_new"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:text="➕ New"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text_white"
+                    android:background="@drawable/badge_wifi"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp" />
+            </LinearLayout>
+
+            <!-- Horizontal Terminal Chips Bar (quick switcher) -->
+            <HorizontalScrollView
+                android:id="@+id/scroll_term_chips"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:scrollbars="none"
+                android:layout_marginBottom="8dp">
+
+                <LinearLayout
+                    android:id="@+id/layout_term_chips"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal" />
+            </HorizontalScrollView>
+
+            <!-- Container A: Terminal Cards List (when viewing all terminals) -->
+            <ScrollView
+                android:id="@+id/scroll_term_list"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:fillViewport="true">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:id="@+id/container_terminals_list"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical" />
+
+                    <!-- Empty State -->
+                    <LinearLayout
+                        android:id="@+id/layout_terminals_empty"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:gravity="center"
+                        android:background="@drawable/card_bg"
+                        android:padding="28dp"
+                        android:visibility="gone">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="📟"
+                            android:textSize="36sp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="No Open Terminals Detected"
+                            android:textSize="15sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/text_white"
+                            android:layout_marginTop="8dp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Open Konsole or another terminal on your laptop, or tap ➕ New to launch one."
+                            android:textSize="12sp"
+                            android:textColor="@color/text_muted"
+                            android:gravity="center"
+                            android:layout_marginTop="4dp" />
+                    </LinearLayout>
+                </LinearLayout>
+            </ScrollView>
+
+            <!-- Container B: Interactive Live Terminal View (when a terminal is selected) -->
+            <LinearLayout
+                android:id="@+id/layout_terminal_interactive"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <!-- Interactive Header Bar -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="4dp">
+
+                    <Button
+                        android:id="@+id/btn_interactive_back"
+                        android:layout_width="wrap_content"
+                        android:layout_height="32dp"
+                        android:text="⬅ List"
+                        android:textSize="11sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/text_white"
+                        android:background="@drawable/card_bg"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp"
+                        android:layout_marginEnd="6dp" />
+
+                    <TextView
+                        android:id="@+id/tv_interactive_title"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Terminal Title"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/accent_cyan"
+                        android:singleLine="true"
+                        android:ellipsize="middle" />
+
+                    <TextView
+                        android:id="@+id/tv_interactive_status"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="🟢 Live"
+                        android:textSize="10sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/status_green"
+                        android:layout_marginEnd="6dp" />
+
+                    <Button
+                        android:id="@+id/btn_interactive_refresh"
+                        android:layout_width="32dp"
+                        android:layout_height="32dp"
+                        android:text="🔄"
+                        android:textSize="12sp"
+                        android:textColor="@color/text_white"
+                        android:background="@drawable/card_bg" />
+                </LinearLayout>
+
+                <!-- Current Directory Indicator -->
+                <TextView
+                    android:id="@+id/tv_interactive_cwd"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="📁 /home/user"
+                    android:textSize="11sp"
+                    android:textColor="@color/text_muted"
+                    android:singleLine="true"
+                    android:ellipsize="start"
+                    android:layout_marginBottom="6dp" />
+
+                <!-- Terminal Screen (Monospace, Console Box) -->
+                <ScrollView
+                    android:id="@+id/scroll_term_screen"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:background="#050B14"
+                    android:fillViewport="true"
+                    android:layout_marginBottom="6dp">
+
+                    <TextView
+                        android:id="@+id/tv_term_screen"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:padding="10dp"
+                        android:typeface="monospace"
+                        android:textSize="11sp"
+                        android:textColor="#39FF14"
+                        android:textIsSelectable="true"
+                        android:text="Connecting to terminal..." />
+                </ScrollView>
+
+                <!-- Quick Keys Toolbar -->
+                <HorizontalScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:scrollbars="none"
+                    android:layout_marginBottom="6dp">
+
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="30dp"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <Button
+                            android:id="@+id/btn_key_ctrl_c"
+                            android:layout_width="wrap_content"
+                            android:layout_height="26dp"
+                            android:text="Ctrl+C"
+                            android:textSize="10sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/status_red"
+                            android:background="@drawable/card_bg"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="8dp"
+                            android:layout_marginEnd="4dp" />
+
+                        <Button
+                            android:id="@+id/btn_key_tab"
+                            android:layout_width="wrap_content"
+                            android:layout_height="26dp"
+                            android:text="Tab"
+                            android:textSize="10sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/text_white"
+                            android:background="@drawable/card_bg"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="8dp"
+                            android:layout_marginEnd="4dp" />
+
+                        <Button
+                            android:id="@+id/btn_key_up"
+                            android:layout_width="32dp"
+                            android:layout_height="26dp"
+                            android:text="↑"
+                            android:textSize="11sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/accent_cyan"
+                            android:background="@drawable/card_bg"
+                            android:layout_marginEnd="4dp" />
+
+                        <Button
+                            android:id="@+id/btn_key_down"
+                            android:layout_width="32dp"
+                            android:layout_height="26dp"
+                            android:text="↓"
+                            android:textSize="11sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/accent_cyan"
+                            android:background="@drawable/card_bg"
+                            android:layout_marginEnd="4dp" />
+
+                        <Button
+                            android:id="@+id/btn_key_ctrl_d"
+                            android:layout_width="wrap_content"
+                            android:layout_height="26dp"
+                            android:text="Ctrl+D"
+                            android:textSize="10sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/text_white"
+                            android:background="@drawable/card_bg"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="8dp"
+                            android:layout_marginEnd="4dp" />
+
+                        <Button
+                            android:id="@+id/btn_key_clear"
+                            android:layout_width="wrap_content"
+                            android:layout_height="26dp"
+                            android:text="Clear"
+                            android:textSize="10sp"
+                            android:textColor="@color/text_muted"
+                            android:background="@drawable/card_bg"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="8dp" />
+                    </LinearLayout>
+                </HorizontalScrollView>
+
+                <!-- Input & Send Bar -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <EditText
+                        android:id="@+id/et_term_input"
+                        android:layout_width="0dp"
+                        android:layout_height="40dp"
+                        android:layout_weight="1"
+                        android:hint="Type command or input..."
+                        android:textColorHint="@color/text_muted"
+                        android:textColor="@color/text_white"
+                        android:textSize="13sp"
+                        android:typeface="monospace"
+                        android:background="@drawable/card_bg"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp"
+                        android:imeOptions="actionSend"
+                        android:inputType="textNoSuggestions|textVisiblePassword"
+                        android:singleLine="true" />
+
+                    <Button
+                        android:id="@+id/btn_term_send"
+                        android:layout_width="wrap_content"
+                        android:layout_height="40dp"
+                        android:text="Send ↵"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/text_white"
+                        android:background="@drawable/btn_approve"
+                        android:paddingStart="14dp"
+                        android:paddingEnd="14dp"
+                        android:layout_marginStart="6dp" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+    </ViewFlipper>
+</LinearLayout>
