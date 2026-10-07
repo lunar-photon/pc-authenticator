@@ -984,7 +984,10 @@ def write_terminal(term_id, text):
     if ':' in term_id and 'org.kde.konsole' in term_id:
         svc, sid = term_id.split(':', 1)
         spath = f'/Sessions/{sid}'
-        subprocess.run(['qdbus6', svc, spath, 'org.kde.konsole.Session.sendText', text], capture_output=True, text=True, timeout=2)
+        res = subprocess.run(['qdbus6', svc, spath, 'org.kde.konsole.Session.sendText', text], capture_output=True, text=True, timeout=2)
+        if res.returncode != 0:
+            err = (res.stdout.strip() or res.stderr.strip()).replace('\n', ' ')
+            return {'status': 'error', 'message': err}
         return {'status': 'ok'}
     return {'status': 'error', 'message': 'Terminal not found or inaccessible'}
 

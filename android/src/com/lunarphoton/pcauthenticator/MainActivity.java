@@ -3852,7 +3852,14 @@ public class MainActivity extends Activity {
                 JSONObject req = new JSONObject();
                 req.put("id", activeTerminalId);
                 req.put("text", text);
-                NetworkUtils.httpPostJsonWithAuth(url, active.authToken, req.toString(), 3000);
+                String res = NetworkUtils.httpPostJsonWithAuth(url, active.authToken, req.toString(), 3000);
+                if (res != null) {
+                    JSONObject obj = new JSONObject(res);
+                    if (!"ok".equals(obj.optString("status"))) {
+                        String msg = obj.optString("message", "Konsole input blocked");
+                        runOnUiThread(() -> Toast.makeText(MainActivity.this, "⚠️ " + msg, Toast.LENGTH_LONG).show());
+                    }
+                }
                 pollActiveTerminalOutput();
             } catch (Exception e) {
                 runOnUiThread(() -> Toast.makeText(MainActivity.this, "Send error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
@@ -3871,7 +3878,14 @@ public class MainActivity extends Activity {
                 JSONObject req = new JSONObject();
                 req.put("id", activeTerminalId);
                 req.put("key", keyName);
-                NetworkUtils.httpPostJsonWithAuth(url, active.authToken, req.toString(), 3000);
+                String res = NetworkUtils.httpPostJsonWithAuth(url, active.authToken, req.toString(), 3000);
+                if (res != null) {
+                    JSONObject obj = new JSONObject(res);
+                    if (!"ok".equals(obj.optString("status"))) {
+                        String msg = obj.optString("message", "Konsole input blocked");
+                        runOnUiThread(() -> Toast.makeText(MainActivity.this, "⚠️ " + msg, Toast.LENGTH_LONG).show());
+                    }
+                }
                 pollActiveTerminalOutput();
             } catch (Exception e) {
                 runOnUiThread(() -> Toast.makeText(MainActivity.this, "Key error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
