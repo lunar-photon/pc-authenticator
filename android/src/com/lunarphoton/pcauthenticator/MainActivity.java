@@ -163,6 +163,8 @@ public class MainActivity extends Activity {
                 updateConnectionStatus(connected, statusText, isInternet);
             } else if ("com.lunarphoton.pcauthenticator.CHALLENGE_RESOLVED".equals(action)) {
                 hideChallenge();
+            } else if ("com.lunarphoton.pcauthenticator.CAPTIVE_STATE_CHANGED".equals(action)) {
+                updateCaptivePortalButton();
             }
         }
     };
@@ -354,6 +356,7 @@ public class MainActivity extends Activity {
         filter.addAction(AuthService.ACTION_CHALLENGE);
         filter.addAction(AuthService.ACTION_STATUS);
         filter.addAction("com.lunarphoton.pcauthenticator.CHALLENGE_RESOLVED");
+        filter.addAction("com.lunarphoton.pcauthenticator.CAPTIVE_STATE_CHANGED");
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(serviceReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
         } else {

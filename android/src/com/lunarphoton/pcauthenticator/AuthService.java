@@ -137,25 +137,12 @@ public class AuthService extends Service {
                 }
                 if (Intent.ACTION_SCREEN_ON.equals(action) || Intent.ACTION_USER_PRESENT.equals(action)) {
                     long now = System.currentTimeMillis();
-                    if (now - lastScreenCheckTime >= 90000L) {
-                        if (CaptivePortalManager.isEnabled(context) && CaptivePortalManager.isCheckOnScreenOn(context)) {
+                    if (now - lastScreenCheckTime >= 45000L) {
+                        if (CaptivePortalManager.isEnabled(context) && CaptivePortalManager.isCheckOnScreenOn(context)
+                                && !CaptivePortalManager.isExplicitlyLoggedOut(context)) {
                             if (DeviceManager.isWifiActive(context)) {
                                 lastScreenCheckTime = now;
-                                new Thread(() -> {
-                                    if (CaptivePortalManager.isInternetConnected(context)) {
-                                        return;
-                                    }
-                                    Log.i(TAG, "Screen woke & Wi-Fi internet blocked. Attempting captive portal login...");
-                                    CaptivePortalManager.LoginResult res = CaptivePortalManager.login(context);
-                                    if (res.success) {
-                                        Log.i(TAG, "Captive portal screen-on login succeeded: " + res.message);
-                                        new Handler(Looper.getMainLooper()).post(() -> {
-                                            Toast.makeText(context, "🌐 " + res.message, Toast.LENGTH_SHORT).show();
-                                        });
-                                    } else {
-                                        Log.w(TAG, "Captive portal screen-on login failed: " + res.message);
-                                    }
-                                }).start();
+                                checkAndAutoLoginIfLoggedOut("Screen wake");
                             }
                         }
                     }
@@ -201,6 +188,67 @@ public class AuthService extends Service {
         initTelephonyListener();
         initClipboardListener();
         initNetworkMonitoring();
+        initCaptivePortalWatchdog();
+    }
+
+    private Handler captiveWatchdogHandler;
+    private Runnable captiveWatchdogRunnable;
+    private long lastAutoLoginAttempt = 0;
+    private static final long AUTO_LOGIN_COOLDOWN_MS = 35000L;
+
+    private void initCaptivePortalWatchdog() {
+        captiveWatchdogHandler = new Handler(Looper.getMainLooper());
+        captiveWatchdogRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (!isRunning) return;
+                try {
+                    if (CaptivePortalManager.isEnabled(AuthService.this)
+                            && CaptivePortalManager.isAutoLoginOnWifi(AuthService.this)
+                            && DeviceManager.isWifiActive(AuthService.this)
+                            && !CaptivePortalManager.isExplicitlyLoggedOut(AuthService.this)) {
+                        checkAndAutoLoginIfLoggedOut("Periodic background watchdog");
+                    }
+                } catch (Exception e) {
+                    Log.w(TAG, "Captive watchdog error: " + e.getMessage());
+                } finally {
+                    if (isRunning && captiveWatchdogHandler != null) {
+                        captiveWatchdogHandler.postDelayed(this, 60000L);
+                    }
+                }
+            }
+        };
+        captiveWatchdogHandler.postDelayed(captiveWatchdogRunnable, 30000L);
+    }
+
+    private synchronized void checkAndAutoLoginIfLoggedOut(String reason) {
+        long now = System.currentTimeMillis();
+        if (now - lastAutoLoginAttempt < AUTO_LOGIN_COOLDOWN_MS) {
+            return;
+        }
+        lastAutoLoginAttempt = now;
+
+        new Thread(() -> {
+            try {
+                if (CaptivePortalManager.isInternetConnected(AuthService.this)) {
+                    return;
+                }
+
+                Log.i(TAG, "🌐 Network session dropped / internet blocked (" + reason + "). Re-authenticating automatically...");
+                CaptivePortalManager.LoginResult res = CaptivePortalManager.login(AuthService.this);
+                Log.i(TAG, "Auto-relogin result: " + res.status + " - " + res.message);
+
+                if (res.success) {
+                    new Handler(Looper.getMainLooper()).post(() -> {
+                        Toast.makeText(AuthService.this, "🌐 Internet restored: " + res.message, Toast.LENGTH_SHORT).show();
+                    });
+                    sendBroadcast(new Intent("com.lunarphoton.pcauthenticator.CAPTIVE_STATE_CHANGED")
+                            .setPackage(getPackageName()));
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Error in auto-relogin: " + e.getMessage());
+            }
+        }).start();
     }
 
     private void initNetworkMonitoring() {
@@ -221,10 +269,22 @@ public class AuthService extends Service {
 
                             if (wifi && CaptivePortalManager.isEnabled(AuthService.this)
                                     && CaptivePortalManager.isAutoLoginOnWifi(AuthService.this)) {
-                                Log.i(TAG, "Triggering captive portal auto-login on Wi-Fi connection...");
-                                CaptivePortalManager.loginAsync(AuthService.this, res -> {
-                                    Log.i(TAG, "Captive portal auto-login result: " + res.status + " - " + res.message);
-                                });
+                                CaptivePortalManager.setExplicitlyLoggedOut(AuthService.this, false);
+                                checkAndAutoLoginIfLoggedOut("Wi-Fi network connected");
+                            }
+                        }
+                    }
+
+                    @Override
+                    public void onCapabilitiesChanged(Network network, NetworkCapabilities networkCapabilities) {
+                        if (CaptivePortalManager.isEnabled(AuthService.this)
+                                && CaptivePortalManager.isAutoLoginOnWifi(AuthService.this)
+                                && DeviceManager.isWifiActive(AuthService.this)
+                                && !CaptivePortalManager.isExplicitlyLoggedOut(AuthService.this)) {
+                            boolean hasCaptive = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL);
+                            boolean isValidated = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+                            if (hasCaptive || !isValidated) {
+                                checkAndAutoLoginIfLoggedOut("Capabilities changed: captive=" + hasCaptive + ", validated=" + isValidated);
                             }
                         }
                     }
@@ -1370,6 +1430,10 @@ public class AuthService extends Service {
     @Override
     public void onDestroy() {
         isRunning = false;
+        if (captiveWatchdogHandler != null && captiveWatchdogRunnable != null) {
+            captiveWatchdogHandler.removeCallbacks(captiveWatchdogRunnable);
+            captiveWatchdogHandler = null;
+        }
         if (clipListener != null) {
             try {
                 ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);

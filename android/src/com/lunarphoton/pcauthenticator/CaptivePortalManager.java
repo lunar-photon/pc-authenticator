@@ -38,6 +38,7 @@ public class CaptivePortalManager {
     public static final String PREF_PASSWORD = "captive_portal_password";
     public static final String PREF_AUTOLOGIN_WIFI = "captive_portal_autologin_wifi";
     public static final String PREF_CHECK_SCREEN_ON = "captive_portal_check_screen_on";
+    public static final String PREF_EXPLICIT_LOGOUT = "captive_portal_explicit_logout";
     public static final String PREF_LAST_STATUS = "captive_portal_last_status";
     public static final String PREF_LAST_MSG = "captive_portal_last_msg";
     public static final String PREF_LAST_TIME = "captive_portal_last_time";
@@ -106,6 +107,18 @@ public class CaptivePortalManager {
         return prefs.getBoolean(PREF_CHECK_SCREEN_ON, true);
     }
 
+    public static boolean isExplicitlyLoggedOut(Context context) {
+        if (context == null) return false;
+        SharedPreferences prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        return prefs.getBoolean(PREF_EXPLICIT_LOGOUT, false);
+    }
+
+    public static void setExplicitlyLoggedOut(Context context, boolean loggedOut) {
+        if (context == null) return;
+        SharedPreferences prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        prefs.edit().putBoolean(PREF_EXPLICIT_LOGOUT, loggedOut).apply();
+    }
+
     public static void saveConfig(Context context, boolean enabled, String gatewayUrl, String username, String password, boolean autoLogin, boolean checkScreenOn) {
         if (context == null) return;
         SharedPreferences prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
@@ -160,6 +173,9 @@ public class CaptivePortalManager {
                     .putString(PREF_LAST_MSG, res.message)
                     .putLong(PREF_LAST_TIME, System.currentTimeMillis())
                     .apply();
+            if (res.success) {
+                setExplicitlyLoggedOut(context, false);
+            }
         }
         return res;
     }
@@ -455,6 +471,7 @@ public class CaptivePortalManager {
             if (context != null) {
                 SharedPreferences prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
                 prefs.edit().putString(PREF_LAST_STATUS, "Logged Out").apply();
+                setExplicitlyLoggedOut(context, true);
             }
 
             return new LoginResult(true, "LOGGED_OUT", message != null && !message.isEmpty() ? message : "Signed out successfully", latency);
