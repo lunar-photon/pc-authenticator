@@ -341,6 +341,111 @@ public class CaptivePortalManager {
         }
     }
 
+    public static LoginResult logout(Context context) {
+        String url = getGatewayUrl(context);
+        String user = getUsername(context);
+        return logout(context, url, user);
+    }
+
+    public static LoginResult logout(Context context, String gatewayUrl, String username) {
+        long start = System.currentTimeMillis();
+        if (gatewayUrl == null || gatewayUrl.trim().isEmpty()) {
+            gatewayUrl = DEFAULT_GATEWAY_URL;
+        }
+        if (username == null || username.trim().isEmpty()) {
+            return new LoginResult(false, "ERROR", "Username is required", 0);
+        }
+
+        String logoutUrl = gatewayUrl.replace("login.xml", "logout.xml");
+        Network wifiNet = (context != null) ? DeviceManager.getWifiNetwork(context) : null;
+        logDebug(context, "Initiating portal logout. Gateway=" + logoutUrl + ", User=" + username);
+
+        HttpURLConnection conn = null;
+        try {
+            TrustManager[] trustAll = new TrustManager[]{
+                new X509TrustManager() {
+                    public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
+                    public void checkClientTrusted(X509Certificate[] certs, String authType) {}
+                    public void checkServerTrusted(X509Certificate[] certs, String authType) {}
+                }
+            };
+            SSLContext sc = SSLContext.getInstance("TLS");
+            sc.init(null, trustAll, new SecureRandom());
+
+            URL u = new URL(logoutUrl.trim());
+            if (wifiNet != null) {
+                try {
+                    conn = (HttpURLConnection) wifiNet.openConnection(u);
+                } catch (Exception ex) {
+                    conn = (HttpURLConnection) u.openConnection();
+                }
+            } else {
+                conn = (HttpURLConnection) u.openConnection();
+            }
+
+            if (conn instanceof HttpsURLConnection) {
+                HttpsURLConnection httpsConn = (HttpsURLConnection) conn;
+                httpsConn.setSSLSocketFactory(sc.getSocketFactory());
+                httpsConn.setHostnameVerifier((h, s) -> true);
+            }
+
+            conn.setRequestMethod("POST");
+            conn.setConnectTimeout(5000);
+            conn.setReadTimeout(6000);
+            conn.setDoOutput(true);
+
+            String hostWithPort = u.getHost() + (u.getPort() > 0 ? ":" + u.getPort() : "");
+            String origin = u.getProtocol() + "://" + hostWithPort;
+            conn.setRequestProperty("Origin", origin);
+            conn.setRequestProperty("Referer", origin + "/httpclient.html");
+            conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android; PCAuthenticator)");
+
+            long timestamp = System.currentTimeMillis();
+            String postData = "mode=193&username=" + URLEncoder.encode(username.trim(), "UTF-8")
+                    + "&a=" + timestamp
+                    + "&producttype=0";
+
+            byte[] postBytes = postData.getBytes("UTF-8");
+            conn.setRequestProperty("Content-Length", String.valueOf(postBytes.length));
+
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(postBytes);
+                os.flush();
+            }
+
+            int code = conn.getResponseCode();
+            StringBuilder sb = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+                    code >= 200 && code < 400 ? conn.getInputStream() : conn.getErrorStream(), "UTF-8"))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    sb.append(line);
+                }
+            }
+
+            long latency = System.currentTimeMillis() - start;
+            String resp = sb.toString();
+            String message = extractTag(resp, "message");
+            logDebug(context, "Logout response: HTTP " + code + ", msg=" + message);
+
+            if (context != null) {
+                SharedPreferences prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+                prefs.edit().putString(PREF_LAST_STATUS, "Logged Out").apply();
+            }
+
+            return new LoginResult(true, "LOGGED_OUT", message != null && !message.isEmpty() ? message : "Signed out successfully", latency);
+        } catch (Exception e) {
+            long latency = System.currentTimeMillis() - start;
+            logDebug(context, "Logout error: " + e.getMessage());
+            return new LoginResult(false, "ERROR", e.getMessage(), latency);
+        } finally {
+            if (conn != null) {
+                try { conn.disconnect(); } catch (Exception ignored) {}
+            }
+        }
+    }
+
     public static LoginResult triggerPcLogin(Context context) {
         long start = System.currentTimeMillis();
         PairedDevice active = DeviceManager.getActiveDevice(context);

@@ -1264,15 +1264,38 @@ public class MainActivity extends Activity {
                 }
             } else {
                 vibrate(60);
+                String msg = result.message != null ? result.message : "Unknown error";
+                boolean isLimit = msg.toLowerCase().contains("limit");
+                String displayMsg = "Gateway returned: " + msg;
+                if (isLimit) {
+                    displayMsg += "\n\n💡 Tip: Your account hit the concurrent device limit. If an old session is stuck, toggle Airplane mode on and off, or tap 'Logout Phone' below to release this phone's session.";
+                } else {
+                    displayMsg += "\n\nWould you like to review your credentials or retry?";
+                }
                 new AlertDialog.Builder(MainActivity.this)
                         .setTitle("🌐 Internet Login Status")
-                        .setMessage("Gateway returned: " + result.message + "\n\nWould you like to review your credentials or retry?")
+                        .setMessage(displayMsg)
                         .setPositiveButton("Retry", (d, w) -> handleCaptiveLoginClick())
-                        .setNeutralButton("Configure", (d, w) -> showCaptivePortalConfigDialog(null))
+                        .setNeutralButton("Logout Phone", (d, w) -> handleCaptiveLogoutClick())
                         .setNegativeButton("Close", null)
                         .show();
             }
         });
+    }
+
+    private void handleCaptiveLogoutClick() {
+        Toast.makeText(this, "Signing out this phone...", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            CaptivePortalManager.LoginResult res = CaptivePortalManager.logout(this);
+            runOnUiThread(() -> {
+                updateCaptivePortalButton();
+                if (res.success) {
+                    Toast.makeText(MainActivity.this, "✅ " + res.message, Toast.LENGTH_LONG).show();
+                } else {
+                    Toast.makeText(MainActivity.this, "❌ Logout: " + res.message, Toast.LENGTH_LONG).show();
+                }
+            });
+        }).start();
     }
 
     private void showCaptivePortalActionsDialog() {
@@ -1280,6 +1303,7 @@ public class MainActivity extends Activity {
                 "📱 Login This Phone (gateway.iisertvm.ac.in)",
                 "💻 Login Laptop",
                 "⚡ Login Both Phone & Laptop",
+                "🚪 Logout This Phone (free up session)",
                 "⚙️ Configure Portal Credentials"
         };
         new AlertDialog.Builder(this)
@@ -1303,6 +1327,8 @@ public class MainActivity extends Activity {
                         handleCaptiveLoginClick();
                         new Thread(() -> CaptivePortalManager.triggerPcLogin(this)).start();
                     } else if (which == 3) {
+                        handleCaptiveLogoutClick();
+                    } else if (which == 4) {
                         showCaptivePortalConfigDialog(null);
                     }
                 })
