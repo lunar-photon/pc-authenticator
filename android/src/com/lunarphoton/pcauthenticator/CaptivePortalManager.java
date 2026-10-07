@@ -5,6 +5,8 @@ import android.content.SharedPreferences;
 import android.net.Network;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.Build;
+import android.text.Html;
 import android.util.Log;
 
 import java.io.BufferedReader;
@@ -502,10 +504,32 @@ public class CaptivePortalManager {
                     Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
             Matcher m = p.matcher(xml);
             if (m.find()) {
-                return m.group(1).trim();
+                return cleanMessage(m.group(1));
             }
         } catch (Exception ignored) {}
         return "";
+    }
+
+    public static String cleanMessage(String text) {
+        if (text == null || text.isEmpty()) return "";
+        String clean = text;
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                clean = Html.fromHtml(clean, Html.FROM_HTML_MODE_LEGACY).toString();
+            } else {
+                clean = Html.fromHtml(clean).toString();
+            }
+        } catch (Exception ignored) {}
+        return clean.replace("&#39;", "'")
+                .replace("&#x27;", "'")
+                .replace("&quot;", "\"")
+                .replace("&#34;", "\"")
+                .replace("&amp;", "&")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&nbsp;", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
     }
 
     public static String detectGatewayUrl() {
