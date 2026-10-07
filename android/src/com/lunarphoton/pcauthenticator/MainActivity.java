@@ -174,6 +174,7 @@ public class MainActivity extends Activity {
     private Button btnKeyCtrlD;
     private Button btnKeyClear;
     private Button btnKeyCopy;
+    private Button btnKeyEnter;
 
     private EditText etTermInput;
     private Button btnTermSend;
@@ -3462,6 +3463,7 @@ public class MainActivity extends Activity {
         btnKeyCtrlD = findViewById(R.id.btn_key_ctrl_d);
         btnKeyClear = findViewById(R.id.btn_key_clear);
         btnKeyCopy = findViewById(R.id.btn_key_copy);
+        btnKeyEnter = findViewById(R.id.btn_key_enter);
 
         etTermInput = findViewById(R.id.et_term_input);
         btnTermSend = findViewById(R.id.btn_term_send);
@@ -3492,6 +3494,9 @@ public class MainActivity extends Activity {
         if (btnKeyCopy != null) {
             btnKeyCopy.setOnClickListener(v -> copyTerminalTextToClipboard());
         }
+        if (btnKeyEnter != null) {
+            btnKeyEnter.setOnClickListener(v -> sendTerminalKey("enter"));
+        }
         if (tvTermScreen != null) {
             tvTermScreen.setOnLongClickListener(v -> {
                 copyTerminalTextToClipboard();
@@ -3504,7 +3509,8 @@ public class MainActivity extends Activity {
         }
         if (etTermInput != null) {
             etTermInput.setOnEditorActionListener((v, actionId, event) -> {
-                if (actionId == EditorInfo.IME_ACTION_SEND || actionId == EditorInfo.IME_ACTION_DONE) {
+                if (actionId == EditorInfo.IME_ACTION_SEND || actionId == EditorInfo.IME_ACTION_DONE ||
+                    (event != null && event.getKeyCode() == android.view.KeyEvent.KEYCODE_ENTER && event.getAction() == android.view.KeyEvent.ACTION_DOWN)) {
                     handleSendTerminalInput();
                     return true;
                 }
@@ -3836,9 +3842,9 @@ public class MainActivity extends Activity {
 
     private void handleSendTerminalInput() {
         if (activeTerminalId == null || etTermInput == null) return;
-        String cmd = etTermInput.getText().toString();
+        String cmd = etTermInput.getText() != null ? etTermInput.getText().toString() : "";
         etTermInput.setText("");
-        sendTerminalRawText(cmd + "\n");
+        sendTerminalRawText(cmd.isEmpty() ? "\r" : (cmd + "\r"));
     }
 
     private void sendTerminalRawText(String text) {

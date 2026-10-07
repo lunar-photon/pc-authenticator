@@ -984,6 +984,10 @@ def write_terminal(term_id, text):
     if ':' in term_id and 'org.kde.konsole' in term_id:
         svc, sid = term_id.split(':', 1)
         spath = f'/Sessions/{sid}'
+        # In terminal PTY and raw-mode TUIs (Ink, CLI agents, Node), '\r' submits input.
+        # Normalize trailing \n to \r so input executes properly across shells and TUIs.
+        if text.endswith('\n'):
+            text = text[:-1] + '\r'
         res = subprocess.run(['qdbus6', svc, spath, 'org.kde.konsole.Session.sendText', text], capture_output=True, text=True, timeout=2)
         if res.returncode != 0:
             err = (res.stdout.strip() or res.stderr.strip()).replace('\n', ' ')
@@ -999,7 +1003,7 @@ def send_terminal_key(term_id, key_name):
         'tab': '\t',
         'up': '\x1b[A',
         'down': '\x1b[B',
-        'enter': '\n',
+        'enter': '\r',
         'escape': '\x1b'
     }
     char = KEY_MAP.get(key_name.lower())
