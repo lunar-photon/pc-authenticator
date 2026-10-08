@@ -32,6 +32,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.WindowManager;
 import android.view.GestureDetector;
+import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.inputmethod.EditorInfo;
 import android.text.InputType;
@@ -3466,12 +3467,25 @@ public class MainActivity extends Activity {
         tvTermScreen = findViewById(R.id.tv_term_screen);
         btnTermLoadEarlier = findViewById(R.id.btn_term_load_earlier);
 
+        // Deliberate hold-to-copy handler: requires pressing and holding still for 750ms
+        final Handler termHoldHandler = new Handler(Looper.getMainLooper());
+        final Runnable termHoldRunnable = () -> {
+            if (tvTermScreen != null) {
+                try {
+                    tvTermScreen.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                } catch (Exception ignored) {}
+            }
+            copyTerminalTextToClipboard();
+        };
+        final int HOLD_COPY_DELAY_MS = 750;
+
         // Enable responsive 2D scrolling: ensure vertical scrolls are never blocked by horizontal scrolling
         View.OnTouchListener termTouchListener = new View.OnTouchListener() {
             private float startX = 0f;
             private float startY = 0f;
             private boolean isDraggingHorizontal = false;
             private boolean isDraggingVertical = false;
+            private boolean isHoldScheduled = false;
 
             @Override
             public boolean onTouch(View v, MotionEvent event) {
@@ -3484,11 +3498,23 @@ public class MainActivity extends Activity {
                         if (scrollTermScreen != null) {
                             scrollTermScreen.requestDisallowInterceptTouchEvent(false);
                         }
+                        // Schedule hold-to-copy only if user holds finger still without moving
+                        termHoldHandler.removeCallbacks(termHoldRunnable);
+                        termHoldHandler.postDelayed(termHoldRunnable, HOLD_COPY_DELAY_MS);
+                        isHoldScheduled = true;
                         break;
 
                     case MotionEvent.ACTION_MOVE:
                         float dx = Math.abs(event.getX() - startX);
                         float dy = Math.abs(event.getY() - startY);
+
+                        // If user moved more than a slight touch (10px), cancel hold immediately
+                        if (dx > 10 || dy > 10) {
+                            if (isHoldScheduled) {
+                                termHoldHandler.removeCallbacks(termHoldRunnable);
+                                isHoldScheduled = false;
+                            }
+                        }
 
                         if (!isDraggingHorizontal && !isDraggingVertical) {
                             if (dy > 10 && dy > dx) {
@@ -3511,6 +3537,11 @@ public class MainActivity extends Activity {
 
                     case MotionEvent.ACTION_UP:
                     case MotionEvent.ACTION_CANCEL:
+                        // Touch ended or cancelled: cancel hold immediately
+                        if (isHoldScheduled) {
+                            termHoldHandler.removeCallbacks(termHoldRunnable);
+                            isHoldScheduled = false;
+                        }
                         isDraggingHorizontal = false;
                         isDraggingVertical = false;
                         if (scrollTermScreen != null) {
@@ -3576,12 +3607,6 @@ public class MainActivity extends Activity {
         }
         if (btnKeyEnter != null) {
             btnKeyEnter.setOnClickListener(v -> sendTerminalKey("enter"));
-        }
-        if (tvTermScreen != null) {
-            tvTermScreen.setOnLongClickListener(v -> {
-                copyTerminalTextToClipboard();
-                return true;
-            });
         }
 
         if (btnTermSend != null) {
@@ -3808,7 +3833,7 @@ public class MainActivity extends Activity {
     private void applyOrientationLayout(int orientation) {
         boolean isLandscape = (orientation == Configuration.ORIENTATION_LANDSCAPE);
         if (btnInteractiveRotate != null) {
-            btnInteractiveRotate.setText(isLandscape ? "📱" : "🔄");
+            btnInteractiveRotate.setText(isLandscape ? "📱" : "🖥️");
         }
 
         boolean isInteractiveActive = (activeTerminalId != null && layoutTerminalInteractive != null && layoutTerminalInteractive.getVisibility() == View.VISIBLE);
@@ -3846,7 +3871,7 @@ public class MainActivity extends Activity {
         preserveDistanceFromBottom = -1;
         isFirstTerminalLoad = true;
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
-        if (btnInteractiveRotate != null) btnInteractiveRotate.setText("🔄");
+        if (btnInteractiveRotate != null) btnInteractiveRotate.setText("🖥️");
         if (layoutTerminalInteractive != null) layoutTerminalInteractive.setVisibility(View.GONE);
         if (layoutTerminalsListHeader != null) layoutTerminalsListHeader.setVisibility(View.VISIBLE);
         if (scrollTermChips != null) scrollTermChips.setVisibility(View.VISIBLE);

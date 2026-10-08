@@ -1094,22 +1094,25 @@
 
                     <Button
                         android:id="@+id/btn_interactive_rotate"
-                        android:layout_width="32dp"
+                        android:layout_width="34dp"
                         android:layout_height="32dp"
-                        android:text="🔄"
-                        android:textSize="12sp"
+                        android:text="🖥️"
+                        android:textSize="13sp"
                         android:textColor="@color/text_white"
                         android:background="@drawable/card_bg"
+                        android:contentDescription="Rotate screen"
                         android:layout_marginEnd="6dp" />
 
                     <Button
                         android:id="@+id/btn_interactive_refresh"
-                        android:layout_width="32dp"
+                        android:layout_width="34dp"
                         android:layout_height="32dp"
                         android:text="⟳"
-                        android:textSize="14sp"
-                        android:textColor="@color/text_white"
-                        android:background="@drawable/card_bg" />
+                        android:textSize="15sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/accent_cyan"
+                        android:background="@drawable/card_bg"
+                        android:contentDescription="Refresh terminal" />
                 </LinearLayout>
 
                 <!-- Current Directory Indicator -->
