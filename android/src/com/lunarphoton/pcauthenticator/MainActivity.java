@@ -152,6 +152,10 @@ public class MainActivity extends Activity {
     private Button btnOpenTerminalsAction;
     private GestureDetector swipeGestureDetector;
 
+    private View layoutTopTabs;
+    private View panelTerminals;
+    private View layoutTerminalsListHeader;
+    private HorizontalScrollView scrollTermChips;
     private Button btnTerminalsRefresh;
     private Button btnTerminalsNew;
     private LinearLayout layoutTermChips;
@@ -167,6 +171,7 @@ public class MainActivity extends Activity {
     private Button btnInteractiveRotate;
     private TextView tvInteractiveCwd;
     private ScrollView scrollTermScreen;
+    private HorizontalScrollView hscrollTermScreen;
     private TextView tvTermScreen;
     private Button btnTermLoadEarlier;
 
@@ -3438,6 +3443,10 @@ public class MainActivity extends Activity {
         });
 
         // Terminals Panel Views
+        layoutTopTabs = findViewById(R.id.layout_top_tabs);
+        panelTerminals = findViewById(R.id.panel_terminals);
+        layoutTerminalsListHeader = findViewById(R.id.layout_terminals_list_header);
+        scrollTermChips = findViewById(R.id.scroll_term_chips);
         btnTerminalsRefresh = findViewById(R.id.btn_terminals_refresh);
         btnTerminalsNew = findViewById(R.id.btn_terminals_new);
         layoutTermChips = findViewById(R.id.layout_term_chips);
@@ -3453,8 +3462,72 @@ public class MainActivity extends Activity {
         btnInteractiveRotate = findViewById(R.id.btn_interactive_rotate);
         tvInteractiveCwd = findViewById(R.id.tv_interactive_cwd);
         scrollTermScreen = findViewById(R.id.scroll_term_screen);
+        hscrollTermScreen = findViewById(R.id.hscroll_term_screen);
         tvTermScreen = findViewById(R.id.tv_term_screen);
         btnTermLoadEarlier = findViewById(R.id.btn_term_load_earlier);
+
+        // Enable responsive 2D scrolling: ensure vertical scrolls are never blocked by horizontal scrolling
+        View.OnTouchListener termTouchListener = new View.OnTouchListener() {
+            private float startX = 0f;
+            private float startY = 0f;
+            private boolean isDraggingHorizontal = false;
+            private boolean isDraggingVertical = false;
+
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                switch (event.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        startX = event.getX();
+                        startY = event.getY();
+                        isDraggingHorizontal = false;
+                        isDraggingVertical = false;
+                        if (scrollTermScreen != null) {
+                            scrollTermScreen.requestDisallowInterceptTouchEvent(false);
+                        }
+                        break;
+
+                    case MotionEvent.ACTION_MOVE:
+                        float dx = Math.abs(event.getX() - startX);
+                        float dy = Math.abs(event.getY() - startY);
+
+                        if (!isDraggingHorizontal && !isDraggingVertical) {
+                            if (dy > 10 && dy > dx) {
+                                isDraggingVertical = true;
+                                if (scrollTermScreen != null) {
+                                    scrollTermScreen.requestDisallowInterceptTouchEvent(false);
+                                }
+                            } else if (dx > 10 && dx > dy) {
+                                isDraggingHorizontal = true;
+                                if (scrollTermScreen != null) {
+                                    scrollTermScreen.requestDisallowInterceptTouchEvent(true);
+                                }
+                            }
+                        } else if (isDraggingVertical) {
+                            if (scrollTermScreen != null) {
+                                scrollTermScreen.requestDisallowInterceptTouchEvent(false);
+                            }
+                        }
+                        break;
+
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL:
+                        isDraggingHorizontal = false;
+                        isDraggingVertical = false;
+                        if (scrollTermScreen != null) {
+                            scrollTermScreen.requestDisallowInterceptTouchEvent(false);
+                        }
+                        break;
+                }
+                return false;
+            }
+        };
+
+        if (hscrollTermScreen != null) {
+            hscrollTermScreen.setOnTouchListener(termTouchListener);
+        }
+        if (tvTermScreen != null) {
+            tvTermScreen.setOnTouchListener(termTouchListener);
+        }
 
         if (btnTermLoadEarlier != null) {
             btnTermLoadEarlier.setOnClickListener(v -> loadEarlierTerminalHistory());
@@ -3553,6 +3626,7 @@ public class MainActivity extends Activity {
                 tabBtnTerminals.setTextColor(getColor(R.color.text_muted));
                 tabBtnTerminals.setBackground(null);
             }
+            if (layoutTopTabs != null) layoutTopTabs.setVisibility(View.VISIBLE);
             stopTerminalStreamTimer();
         }
     }
@@ -3679,8 +3753,12 @@ public class MainActivity extends Activity {
             btnTermLoadEarlier.setVisibility(View.GONE);
             btnTermLoadEarlier.setEnabled(true);
         }
+        if (layoutTerminalsListHeader != null) layoutTerminalsListHeader.setVisibility(View.GONE);
+        if (scrollTermChips != null) scrollTermChips.setVisibility(View.GONE);
         if (scrollTermList != null) scrollTermList.setVisibility(View.GONE);
         if (layoutTerminalInteractive != null) layoutTerminalInteractive.setVisibility(View.VISIBLE);
+
+        applyOrientationLayout(getResources().getConfiguration().orientation);
 
         if (tvInteractiveTitle != null) tvInteractiveTitle.setText(title);
         if (tvInteractiveCwd != null) {
@@ -3714,23 +3792,51 @@ public class MainActivity extends Activity {
         int currentOrientation = getResources().getConfiguration().orientation;
         if (currentOrientation == Configuration.ORIENTATION_PORTRAIT) {
             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
-            if (btnInteractiveRotate != null) btnInteractiveRotate.setText("📱");
+            applyOrientationLayout(Configuration.ORIENTATION_LANDSCAPE);
         } else {
             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
-            if (btnInteractiveRotate != null) btnInteractiveRotate.setText("🔄");
+            applyOrientationLayout(Configuration.ORIENTATION_PORTRAIT);
         }
     }
 
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
+        applyOrientationLayout(newConfig.orientation);
+    }
+
+    private void applyOrientationLayout(int orientation) {
+        boolean isLandscape = (orientation == Configuration.ORIENTATION_LANDSCAPE);
         if (btnInteractiveRotate != null) {
-            if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE) {
-                btnInteractiveRotate.setText("📱");
+            btnInteractiveRotate.setText(isLandscape ? "📱" : "🔄");
+        }
+
+        boolean isInteractiveActive = (activeTerminalId != null && layoutTerminalInteractive != null && layoutTerminalInteractive.getVisibility() == View.VISIBLE);
+
+        // In landscape mode when viewing an interactive terminal, hide top navigation tabs to maximize terminal height
+        if (layoutTopTabs != null) {
+            if (isLandscape && isInteractiveActive) {
+                layoutTopTabs.setVisibility(View.GONE);
             } else {
-                btnInteractiveRotate.setText("🔄");
+                layoutTopTabs.setVisibility(View.VISIBLE);
             }
         }
+
+        // Adjust padding on panelTerminals for landscape vs portrait
+        if (panelTerminals != null) {
+            if (isLandscape && isInteractiveActive) {
+                int padH = dpToPx(8);
+                int padV = dpToPx(4);
+                panelTerminals.setPadding(padH, padV, padH, padV);
+            } else {
+                int pad = dpToPx(12);
+                panelTerminals.setPadding(pad, pad, pad, pad);
+            }
+        }
+    }
+
+    private int dpToPx(int dp) {
+        return (int) (dp * getResources().getDisplayMetrics().density);
     }
 
     private void closeTerminalInteractive() {
@@ -3742,7 +3848,11 @@ public class MainActivity extends Activity {
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
         if (btnInteractiveRotate != null) btnInteractiveRotate.setText("🔄");
         if (layoutTerminalInteractive != null) layoutTerminalInteractive.setVisibility(View.GONE);
+        if (layoutTerminalsListHeader != null) layoutTerminalsListHeader.setVisibility(View.VISIBLE);
+        if (scrollTermChips != null) scrollTermChips.setVisibility(View.VISIBLE);
         if (scrollTermList != null) scrollTermList.setVisibility(View.VISIBLE);
+        if (layoutTopTabs != null) layoutTopTabs.setVisibility(View.VISIBLE);
+        applyOrientationLayout(getResources().getConfiguration().orientation);
         loadTerminalsList();
     }
 
@@ -3819,7 +3929,7 @@ public class MainActivity extends Activity {
                                 int scrollY = scrollTermScreen.getScrollY();
                                 int scrollHeight = scrollTermScreen.getHeight();
                                 int contentHeight = tvTermScreen.getHeight();
-                                wasAtBottom = (contentHeight <= scrollHeight) || ((contentHeight - (scrollY + scrollHeight)) < 140);
+                                wasAtBottom = (scrollHeight <= 0) || (contentHeight <= scrollHeight) || ((contentHeight - (scrollY + scrollHeight)) < 140);
                             } else {
                                 wasAtBottom = true;
                             }

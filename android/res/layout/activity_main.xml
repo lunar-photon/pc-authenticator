@@ -928,6 +928,7 @@
 
             <!-- Terminals Top Header -->
             <LinearLayout
+                android:id="@+id/layout_terminals_list_header"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
@@ -1127,14 +1128,14 @@
                 <Button
                     android:id="@+id/btn_term_load_earlier"
                     android:layout_width="match_parent"
-                    android:layout_height="28dp"
+                    android:layout_height="26dp"
                     android:text="⬆ Load earlier output"
                     android:textSize="10sp"
                     android:textStyle="bold"
                     android:textColor="@color/accent_cyan"
                     android:background="@drawable/card_bg"
                     android:visibility="gone"
-                    android:layout_marginBottom="4dp" />
+                    android:layout_marginBottom="3dp" />
 
                 <!-- Terminal Screen (Monospace, Console Box) -->
                 <ScrollView
@@ -1142,15 +1143,17 @@
                     android:layout_width="match_parent"
                     android:layout_height="0dp"
                     android:layout_weight="1"
+                    android:minHeight="120dp"
+                    android:scrollbars="vertical"
                     android:background="#050B14"
                     android:fillViewport="true"
-                    android:descendantFocusability="blocksDescendants"
-                    android:layout_marginBottom="6dp">
+                    android:layout_marginBottom="4dp">
 
                     <HorizontalScrollView
                         android:id="@+id/hscroll_term_screen"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
+                        android:scrollbars="horizontal"
                         android:fillViewport="true">
 
                         <TextView
@@ -1171,7 +1174,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:scrollbars="none"
-                    android:layout_marginBottom="6dp">
+                    android:layout_marginBottom="4dp">
 
                     <LinearLayout
                         android:layout_width="wrap_content"
@@ -1289,7 +1292,7 @@
                     <EditText
                         android:id="@+id/et_term_input"
                         android:layout_width="0dp"
-                        android:layout_height="40dp"
+                        android:layout_height="36dp"
                         android:layout_weight="1"
                         android:hint="Type command or input..."
                         android:textColorHint="@color/text_muted"
@@ -1299,14 +1302,14 @@
                         android:background="@drawable/card_bg"
                         android:paddingStart="12dp"
                         android:paddingEnd="12dp"
-                        android:imeOptions="actionSend"
+                        android:imeOptions="actionSend|flagNoExtractUi"
                         android:inputType="textNoSuggestions"
                         android:singleLine="true" />
 
                     <Button
                         android:id="@+id/btn_term_send"
                         android:layout_width="wrap_content"
-                        android:layout_height="40dp"
+                        android:layout_height="36dp"
                         android:text="Send ↵"
                         android:textSize="12sp"
                         android:textStyle="bold"

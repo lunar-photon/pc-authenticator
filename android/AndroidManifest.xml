@@ -60,6 +60,7 @@
             android:showWhenLocked="true"
             android:turnScreenOn="true"
             android:showOnLockScreen="true"
+            android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
