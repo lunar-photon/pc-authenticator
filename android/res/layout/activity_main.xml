@@ -1136,7 +1136,7 @@
                     android:layout_weight="1"
                     android:minHeight="120dp"
                     android:scrollbars="vertical"
-                    android:background="#1E1E2E"
+                    android:background="#0A0F1D"
                     android:fillViewport="true"
                     android:layout_marginBottom="4dp">
 
@@ -1155,7 +1155,7 @@
                             android:typeface="monospace"
                             android:textSize="10.5sp"
                             android:lineSpacingExtra="2dp"
-                            android:textColor="#CDD6F4"
+                            android:textColor="#E2E8F0"
                             android:textIsSelectable="true"
                             android:text="Connecting to terminal..." />
                     </com.lunarphoton.pcauthenticator.TerminalHorizontalScrollView>
