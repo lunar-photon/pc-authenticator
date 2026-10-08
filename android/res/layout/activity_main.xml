@@ -1173,21 +1173,21 @@
                         android:id="@+id/btn_key_mode"
                         android:layout_width="0dp"
                         android:layout_height="match_parent"
-                        android:layout_weight="1.35"
+                        android:layout_weight="1.25"
                         android:text="⚡ Auto: ON"
                         android:textSize="9.5sp"
                         android:textStyle="bold"
                         android:textColor="@color/accent_cyan"
                         android:background="@drawable/card_bg"
-                        android:paddingStart="4dp"
-                        android:paddingEnd="4dp"
-                        android:layout_marginEnd="3dp" />
+                        android:paddingStart="2dp"
+                        android:paddingEnd="2dp"
+                        android:layout_marginEnd="2dp" />
 
                     <Button
                         android:id="@+id/btn_key_ctrl"
                         android:layout_width="0dp"
                         android:layout_height="match_parent"
-                        android:layout_weight="0.95"
+                        android:layout_weight="0.85"
                         android:text="Ctrl"
                         android:textSize="10sp"
                         android:textStyle="bold"
@@ -1195,13 +1195,13 @@
                         android:background="@drawable/card_bg"
                         android:paddingStart="2dp"
                         android:paddingEnd="2dp"
-                        android:layout_marginEnd="3dp" />
+                        android:layout_marginEnd="2dp" />
 
                     <Button
                         android:id="@+id/btn_key_esc"
                         android:layout_width="0dp"
                         android:layout_height="match_parent"
-                        android:layout_weight="0.85"
+                        android:layout_weight="0.8"
                         android:text="Esc"
                         android:textSize="10sp"
                         android:textStyle="bold"
@@ -1209,13 +1209,13 @@
                         android:background="@drawable/card_bg"
                         android:paddingStart="2dp"
                         android:paddingEnd="2dp"
-                        android:layout_marginEnd="3dp" />
+                        android:layout_marginEnd="2dp" />
 
                     <Button
                         android:id="@+id/btn_key_tab"
                         android:layout_width="0dp"
                         android:layout_height="match_parent"
-                        android:layout_weight="0.85"
+                        android:layout_weight="0.8"
                         android:text="Tab"
                         android:textSize="10sp"
                         android:textStyle="bold"
@@ -1223,13 +1223,41 @@
                         android:background="@drawable/card_bg"
                         android:paddingStart="2dp"
                         android:paddingEnd="2dp"
-                        android:layout_marginEnd="3dp" />
+                        android:layout_marginEnd="2dp" />
+
+                    <Button
+                        android:id="@+id/btn_key_left"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="0.7"
+                        android:text="←"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/accent_cyan"
+                        android:background="@drawable/card_bg"
+                        android:paddingStart="2dp"
+                        android:paddingEnd="2dp"
+                        android:layout_marginEnd="2dp" />
+
+                    <Button
+                        android:id="@+id/btn_key_right"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="0.7"
+                        android:text="→"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/accent_cyan"
+                        android:background="@drawable/card_bg"
+                        android:paddingStart="2dp"
+                        android:paddingEnd="2dp"
+                        android:layout_marginEnd="2dp" />
 
                     <Button
                         android:id="@+id/btn_key_up"
                         android:layout_width="0dp"
                         android:layout_height="match_parent"
-                        android:layout_weight="0.75"
+                        android:layout_weight="0.7"
                         android:text="↑"
                         android:textSize="12sp"
                         android:textStyle="bold"
@@ -1237,13 +1265,13 @@
                         android:background="@drawable/card_bg"
                         android:paddingStart="2dp"
                         android:paddingEnd="2dp"
-                        android:layout_marginEnd="3dp" />
+                        android:layout_marginEnd="2dp" />
 
                     <Button
                         android:id="@+id/btn_key_down"
                         android:layout_width="0dp"
                         android:layout_height="match_parent"
-                        android:layout_weight="0.75"
+                        android:layout_weight="0.7"
                         android:text="↓"
                         android:textSize="12sp"
                         android:textStyle="bold"
@@ -1251,13 +1279,13 @@
                         android:background="@drawable/card_bg"
                         android:paddingStart="2dp"
                         android:paddingEnd="2dp"
-                        android:layout_marginEnd="3dp" />
+                        android:layout_marginEnd="2dp" />
 
                     <Button
                         android:id="@+id/btn_key_clear"
                         android:layout_width="0dp"
                         android:layout_height="match_parent"
-                        android:layout_weight="0.95"
+                        android:layout_weight="0.85"
                         android:text="Clear"
                         android:textSize="10sp"
                         android:textColor="@color/text_muted"

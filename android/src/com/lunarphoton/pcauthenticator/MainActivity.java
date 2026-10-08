@@ -183,6 +183,8 @@ public class MainActivity extends Activity {
     private Button btnKeyCtrl;
     private Button btnKeyEsc;
     private Button btnKeyTab;
+    private Button btnKeyLeft;
+    private Button btnKeyRight;
     private Button btnKeyUp;
     private Button btnKeyDown;
     private Button btnKeyClear;
@@ -3465,6 +3467,8 @@ public class MainActivity extends Activity {
         btnKeyCtrl = findViewById(R.id.btn_key_ctrl);
         btnKeyEsc = findViewById(R.id.btn_key_esc);
         btnKeyTab = findViewById(R.id.btn_key_tab);
+        btnKeyLeft = findViewById(R.id.btn_key_left);
+        btnKeyRight = findViewById(R.id.btn_key_right);
         btnKeyUp = findViewById(R.id.btn_key_up);
         btnKeyDown = findViewById(R.id.btn_key_down);
         btnKeyClear = findViewById(R.id.btn_key_clear);
@@ -3528,6 +3532,18 @@ public class MainActivity extends Activity {
                         sendTerminalKey("tab");
                     }
                 }
+                vibrate(15);
+            });
+        }
+        if (btnKeyLeft != null) {
+            btnKeyLeft.setOnClickListener(v -> {
+                sendTerminalKey("left");
+                vibrate(15);
+            });
+        }
+        if (btnKeyRight != null) {
+            btnKeyRight.setOnClickListener(v -> {
+                sendTerminalKey("right");
                 vibrate(15);
             });
         }
