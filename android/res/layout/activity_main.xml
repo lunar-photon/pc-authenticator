@@ -1136,7 +1136,7 @@
                     android:layout_weight="1"
                     android:minHeight="120dp"
                     android:scrollbars="vertical"
-                    android:background="#050B14"
+                    android:background="#0A0F1D"
                     android:fillViewport="true"
                     android:layout_marginBottom="4dp">
 
@@ -1150,12 +1150,12 @@
                         <TextView
                             android:id="@+id/tv_term_screen"
                             android:layout_width="wrap_content"
-                            android:minWidth="340dp"
                             android:layout_height="wrap_content"
                             android:padding="10dp"
                             android:typeface="monospace"
-                            android:textSize="11sp"
-                            android:textColor="#39FF14"
+                            android:textSize="10.5sp"
+                            android:lineSpacingExtra="2dp"
+                            android:textColor="#E2E8F0"
                             android:text="Connecting to terminal..." />
                     </HorizontalScrollView>
                 </ScrollView>
@@ -1178,6 +1178,19 @@
                             android:layout_width="wrap_content"
                             android:layout_height="26dp"
                             android:text="⚡ Auto: ON"
+                            android:textSize="10sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/accent_cyan"
+                            android:background="@drawable/card_bg"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="8dp"
+                            android:layout_marginEnd="4dp" />
+
+                        <Button
+                            android:id="@+id/btn_key_wrap"
+                            android:layout_width="wrap_content"
+                            android:layout_height="26dp"
+                            android:text="🔄 Wrap: ON"
                             android:textSize="10sp"
                             android:textStyle="bold"
                             android:textColor="@color/accent_cyan"

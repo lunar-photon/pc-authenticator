@@ -30,6 +30,7 @@ import android.provider.Settings;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.view.GestureDetector;
 import android.view.HapticFeedbackConstants;
@@ -179,6 +180,7 @@ public class MainActivity extends Activity {
     private Button btnTermLoadEarlier;
 
     private Button btnKeyMode;
+    private Button btnKeyWrap;
     private Button btnKeyCtrlC;
     private Button btnKeyTab;
     private Button btnKeyUp;
@@ -193,6 +195,7 @@ public class MainActivity extends Activity {
     private Button btnTermSend;
 
     private boolean isLiveTypeEnabled = true;
+    private boolean isTerminalWrapEnabled = true;
     private boolean isInternalTextUpdate = false;
     private final ExecutorService terminalSendExecutor = Executors.newSingleThreadExecutor();
     private volatile boolean isPollingTerminal = false;
@@ -3489,7 +3492,13 @@ public class MainActivity extends Activity {
                             }
                         }
 
-                        if (!isDraggingHorizontal && !isDraggingVertical) {
+                        if (isTerminalWrapEnabled) {
+                            isDraggingHorizontal = false;
+                            isDraggingVertical = true;
+                            if (scrollTermScreen != null) {
+                                scrollTermScreen.requestDisallowInterceptTouchEvent(false);
+                            }
+                        } else if (!isDraggingHorizontal && !isDraggingVertical) {
                             if (dy > 10 && dy > dx) {
                                 isDraggingVertical = true;
                                 if (scrollTermScreen != null) {
@@ -3538,6 +3547,7 @@ public class MainActivity extends Activity {
         }
 
         btnKeyMode = findViewById(R.id.btn_key_mode);
+        btnKeyWrap = findViewById(R.id.btn_key_wrap);
         btnKeyCtrlC = findViewById(R.id.btn_key_ctrl_c);
         btnKeyTab = findViewById(R.id.btn_key_tab);
         btnKeyUp = findViewById(R.id.btn_key_up);
@@ -3567,10 +3577,28 @@ public class MainActivity extends Activity {
             btnInteractiveRotate.setOnClickListener(v -> toggleTerminalOrientation());
         }
 
+        if (scrollTermScreen != null) {
+            scrollTermScreen.addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+                if ((right - left) != (oldRight - oldLeft) && isTerminalWrapEnabled) {
+                    applyTerminalWrapMode();
+                }
+            });
+        }
+
         if (btnKeyMode != null) {
             btnKeyMode.setOnClickListener(v -> {
                 isLiveTypeEnabled = !isLiveTypeEnabled;
                 updateLiveModeUI();
+                vibrate(15);
+            });
+        }
+        if (btnKeyWrap != null) {
+            btnKeyWrap.setOnClickListener(v -> {
+                isTerminalWrapEnabled = !isTerminalWrapEnabled;
+                applyTerminalWrapMode();
+                if (tvTermScreen != null && lastLoadedTerminalText != null && !lastLoadedTerminalText.isEmpty()) {
+                    renderColorizedTerminalText(lastLoadedTerminalText);
+                }
                 vibrate(15);
             });
         }
@@ -3846,13 +3874,14 @@ public class MainActivity extends Activity {
         if (layoutTerminalInteractive != null) layoutTerminalInteractive.setVisibility(View.VISIBLE);
 
         applyOrientationLayout(getResources().getConfiguration().orientation);
+        applyTerminalWrapMode();
 
         if (tvInteractiveTitle != null) tvInteractiveTitle.setText(title);
         if (tvInteractiveCwd != null) {
             tvInteractiveCwd.setVisibility(cwd.isEmpty() ? View.GONE : View.VISIBLE);
             tvInteractiveCwd.setText(cwd.isEmpty() ? "" : "📁 " + cwd);
         }
-        if (tvTermScreen != null) tvTermScreen.setText("⚡ Connecting to " + title + "...");
+        renderColorizedTerminalText("⚡ Connecting to " + title + "...");
         if (scrollTermScreen != null) scrollTermScreen.scrollTo(0, 0);
 
         isInternalTextUpdate = true;
@@ -3925,6 +3954,11 @@ public class MainActivity extends Activity {
                 panelTerminals.setPadding(pad, pad, pad, pad);
             }
         }
+
+        applyTerminalWrapMode();
+        if (tvTermScreen != null && lastLoadedTerminalText != null && !lastLoadedTerminalText.isEmpty()) {
+            renderColorizedTerminalText(lastLoadedTerminalText);
+        }
     }
 
     private int dpToPx(int dp) {
@@ -3961,6 +3995,69 @@ public class MainActivity extends Activity {
         if (etTermInput != null) {
             etTermInput.setHint(isLiveTypeEnabled ? "Live typing (shows autocomplete)..." : "Type command, then tap Send...");
         }
+    }
+
+    private void applyTerminalWrapMode() {
+        if (tvTermScreen == null) return;
+        if (isTerminalWrapEnabled) {
+            int viewportWidth = 0;
+            if (scrollTermScreen != null && scrollTermScreen.getWidth() > 0) {
+                viewportWidth = scrollTermScreen.getWidth();
+            } else if (hscrollTermScreen != null && hscrollTermScreen.getWidth() > 0) {
+                viewportWidth = hscrollTermScreen.getWidth();
+            } else {
+                int screenW = getResources().getDisplayMetrics().widthPixels;
+                int pad = dpToPx(24);
+                viewportWidth = Math.max(200, screenW - pad);
+            }
+
+            ViewGroup.LayoutParams lp = tvTermScreen.getLayoutParams();
+            if (lp != null) {
+                lp.width = viewportWidth;
+                tvTermScreen.setLayoutParams(lp);
+            }
+            tvTermScreen.setHorizontallyScrolling(false);
+            if (hscrollTermScreen != null) {
+                hscrollTermScreen.scrollTo(0, 0);
+            }
+        } else {
+            ViewGroup.LayoutParams lp = tvTermScreen.getLayoutParams();
+            if (lp != null) {
+                lp.width = ViewGroup.LayoutParams.WRAP_CONTENT;
+                tvTermScreen.setLayoutParams(lp);
+            }
+            tvTermScreen.setHorizontallyScrolling(true);
+        }
+
+        if (btnKeyWrap != null) {
+            btnKeyWrap.setText(isTerminalWrapEnabled ? "🔄 Wrap: ON" : "↔ Wrap: OFF");
+            btnKeyWrap.setTextColor(getColor(isTerminalWrapEnabled ? R.color.accent_cyan : R.color.text_muted));
+        }
+    }
+
+    private int getTerminalTargetColumns() {
+        if (tvTermScreen == null) return 45;
+        int widthPx = 0;
+        if (scrollTermScreen != null && scrollTermScreen.getWidth() > 0) {
+            widthPx = scrollTermScreen.getWidth();
+        } else {
+            widthPx = getResources().getDisplayMetrics().widthPixels;
+        }
+        float charW = tvTermScreen.getPaint().measureText("─");
+        if (charW <= 0) charW = 18f;
+        int pad = dpToPx(24);
+        return Math.max(30, (int) ((widthPx - pad) / charW));
+    }
+
+    private void renderColorizedTerminalText(String text) {
+        if (tvTermScreen == null) return;
+        if (text == null || text.isEmpty()) {
+            tvTermScreen.setText("(Empty terminal)");
+            return;
+        }
+        int targetCols = getTerminalTargetColumns();
+        CharSequence colorized = TerminalColorizer.colorize(text, isTerminalWrapEnabled, targetCols);
+        tvTermScreen.setText(colorized, TextView.BufferType.SPANNABLE);
     }
 
     private void startTerminalStreamTimer() {
@@ -4074,7 +4171,7 @@ public class MainActivity extends Activity {
                                     }
                                 }, 120);
 
-                                tvTermScreen.setText(text.isEmpty() ? "(Empty terminal)" : text);
+                                renderColorizedTerminalText(text);
                             }
                         });
                     }
