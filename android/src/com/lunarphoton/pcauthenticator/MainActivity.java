@@ -35,7 +35,9 @@ import android.view.GestureDetector;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.inputmethod.EditorInfo;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
@@ -75,6 +77,8 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MainActivity extends Activity {
     private TextView tvHostname;
@@ -174,17 +178,26 @@ public class MainActivity extends Activity {
     private TextView tvTermScreen;
     private Button btnTermLoadEarlier;
 
+    private Button btnKeyMode;
     private Button btnKeyCtrlC;
     private Button btnKeyTab;
     private Button btnKeyUp;
     private Button btnKeyDown;
+    private Button btnKeyEnter;
+    private Button btnKeyEsc;
     private Button btnKeyCtrlD;
     private Button btnKeyClear;
     private Button btnKeyCopy;
-    private Button btnKeyEnter;
 
     private EditText etTermInput;
     private Button btnTermSend;
+
+    private boolean isLiveTypeEnabled = true;
+    private boolean isInternalTextUpdate = false;
+    private final ExecutorService terminalSendExecutor = Executors.newSingleThreadExecutor();
+    private volatile boolean isPollingTerminal = false;
+    private volatile boolean hasPendingTerminalPoll = false;
+    private static final int TERMINAL_STREAM_INTERVAL_MS = 350;
 
     private String activeTerminalId = null;
     private String activeTerminalTitle = "";
@@ -3382,6 +3395,9 @@ public class MainActivity extends Activity {
         }
         stopTerminalStreamTimer();
         try {
+            terminalSendExecutor.shutdownNow();
+        } catch (Exception ignored) {}
+        try {
             unregisterReceiver(serviceReceiver);
         } catch (Exception ignored) {}
         super.onDestroy();
@@ -3521,14 +3537,16 @@ public class MainActivity extends Activity {
             btnTermLoadEarlier.setOnClickListener(v -> loadEarlierTerminalHistory());
         }
 
+        btnKeyMode = findViewById(R.id.btn_key_mode);
         btnKeyCtrlC = findViewById(R.id.btn_key_ctrl_c);
         btnKeyTab = findViewById(R.id.btn_key_tab);
         btnKeyUp = findViewById(R.id.btn_key_up);
         btnKeyDown = findViewById(R.id.btn_key_down);
-        btnKeyCtrlD = findViewById(R.id.btn_key_ctrl_d);
-        btnKeyClear = findViewById(R.id.btn_key_clear);
-        btnKeyCopy = findViewById(R.id.btn_key_copy);
         btnKeyEnter = findViewById(R.id.btn_key_enter);
+        btnKeyEsc = findViewById(R.id.btn_key_esc);
+        btnKeyCtrlD = findViewById(R.id.btn_key_ctrl_d);
+        btnKeyCopy = findViewById(R.id.btn_key_copy);
+        btnKeyClear = findViewById(R.id.btn_key_clear);
 
         etTermInput = findViewById(R.id.et_term_input);
         btnTermSend = findViewById(R.id.btn_term_send);
@@ -3549,27 +3567,113 @@ public class MainActivity extends Activity {
             btnInteractiveRotate.setOnClickListener(v -> toggleTerminalOrientation());
         }
 
-        if (btnKeyCtrlC != null) btnKeyCtrlC.setOnClickListener(v -> sendTerminalKey("ctrl_c"));
-        if (btnKeyCtrlD != null) btnKeyCtrlD.setOnClickListener(v -> sendTerminalKey("ctrl_d"));
-        if (btnKeyTab != null) btnKeyTab.setOnClickListener(v -> sendTerminalKey("tab"));
-        if (btnKeyUp != null) btnKeyUp.setOnClickListener(v -> sendTerminalKey("up"));
-        if (btnKeyDown != null) btnKeyDown.setOnClickListener(v -> sendTerminalKey("down"));
+        if (btnKeyMode != null) {
+            btnKeyMode.setOnClickListener(v -> {
+                isLiveTypeEnabled = !isLiveTypeEnabled;
+                updateLiveModeUI();
+                vibrate(15);
+            });
+        }
+        if (btnKeyEsc != null) {
+            btnKeyEsc.setOnClickListener(v -> {
+                sendTerminalKey("escape");
+                vibrate(15);
+            });
+        }
+        if (btnKeyCtrlC != null) {
+            btnKeyCtrlC.setOnClickListener(v -> {
+                sendTerminalKey("ctrl_c");
+                isInternalTextUpdate = true;
+                if (etTermInput != null) etTermInput.setText("");
+                isInternalTextUpdate = false;
+                vibrate(15);
+            });
+        }
+        if (btnKeyCtrlD != null) {
+            btnKeyCtrlD.setOnClickListener(v -> {
+                sendTerminalKey("ctrl_d");
+                vibrate(15);
+            });
+        }
+        if (btnKeyTab != null) {
+            btnKeyTab.setOnClickListener(v -> {
+                if (isLiveTypeEnabled) {
+                    sendTerminalKey("tab");
+                } else {
+                    String current = etTermInput != null && etTermInput.getText() != null ? etTermInput.getText().toString() : "";
+                    if (!current.isEmpty()) {
+                        sendTerminalRawText(current + "\t");
+                    } else {
+                        sendTerminalKey("tab");
+                    }
+                }
+                vibrate(15);
+            });
+        }
+        if (btnKeyUp != null) {
+            btnKeyUp.setOnClickListener(v -> {
+                sendTerminalKey("up");
+                vibrate(15);
+            });
+        }
+        if (btnKeyDown != null) {
+            btnKeyDown.setOnClickListener(v -> {
+                sendTerminalKey("down");
+                vibrate(15);
+            });
+        }
+        if (btnKeyEnter != null) {
+            btnKeyEnter.setOnClickListener(v -> {
+                handleSendTerminalInput();
+                vibrate(15);
+            });
+        }
         if (btnKeyClear != null) {
             btnKeyClear.setOnClickListener(v -> {
                 if (tvTermScreen != null) tvTermScreen.setText("");
+                vibrate(15);
             });
         }
         if (btnKeyCopy != null) {
-            btnKeyCopy.setOnClickListener(v -> copyTerminalTextToClipboard());
-        }
-        if (btnKeyEnter != null) {
-            btnKeyEnter.setOnClickListener(v -> sendTerminalKey("enter"));
+            btnKeyCopy.setOnClickListener(v -> {
+                copyTerminalTextToClipboard();
+                vibrate(15);
+            });
         }
 
         if (btnTermSend != null) {
             btnTermSend.setOnClickListener(v -> handleSendTerminalInput());
         }
         if (etTermInput != null) {
+            etTermInput.addTextChangedListener(new TextWatcher() {
+                @Override
+                public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+                @Override
+                public void onTextChanged(CharSequence s, int start, int before, int count) {
+                    if (isInternalTextUpdate || !isLiveTypeEnabled || activeTerminalId == null) {
+                        return;
+                    }
+                    if (before > 0) {
+                        StringBuilder bs = new StringBuilder();
+                        for (int i = 0; i < before; i++) {
+                            bs.append('\u007f');
+                        }
+                        sendTerminalRawText(bs.toString());
+                    }
+                    if (count > 0) {
+                        String added = s.subSequence(start, start + count).toString();
+                        added = added.replace("\r", "").replace("\n", "");
+                        if (!added.isEmpty()) {
+                            sendTerminalRawText(added);
+                        }
+                    }
+                }
+
+                @Override
+                public void afterTextChanged(Editable s) {}
+            });
+
             etTermInput.setOnEditorActionListener((v, actionId, event) -> {
                 if (actionId == EditorInfo.IME_ACTION_SEND || actionId == EditorInfo.IME_ACTION_DONE ||
                     (event != null && event.getKeyCode() == android.view.KeyEvent.KEYCODE_ENTER && event.getAction() == android.view.KeyEvent.ACTION_DOWN)) {
@@ -3579,6 +3683,7 @@ public class MainActivity extends Activity {
                 return false;
             });
         }
+        updateLiveModeUI();
     }
 
     private void switchToPanel(int panelIndex) {
@@ -3750,6 +3855,11 @@ public class MainActivity extends Activity {
         if (tvTermScreen != null) tvTermScreen.setText("⚡ Connecting to " + title + "...");
         if (scrollTermScreen != null) scrollTermScreen.scrollTo(0, 0);
 
+        isInternalTextUpdate = true;
+        if (etTermInput != null) etTermInput.setText("");
+        isInternalTextUpdate = false;
+        updateLiveModeUI();
+
         pollActiveTerminalOutput();
         startTerminalStreamTimer();
     }
@@ -3838,6 +3948,21 @@ public class MainActivity extends Activity {
         loadTerminalsList();
     }
 
+    private void updateLiveModeUI() {
+        if (btnKeyMode != null) {
+            if (isLiveTypeEnabled) {
+                btnKeyMode.setText("⚡ Auto: ON");
+                btnKeyMode.setTextColor(getColor(R.color.accent_cyan));
+            } else {
+                btnKeyMode.setText("💬 Buffer");
+                btnKeyMode.setTextColor(getColor(R.color.text_muted));
+            }
+        }
+        if (etTermInput != null) {
+            etTermInput.setHint(isLiveTypeEnabled ? "Live typing (shows autocomplete)..." : "Type command, then tap Send...");
+        }
+    }
+
     private void startTerminalStreamTimer() {
         stopTerminalStreamTimer();
         terminalPollRunnable = new Runnable() {
@@ -3845,11 +3970,11 @@ public class MainActivity extends Activity {
             public void run() {
                 if (activeTerminalId != null && layoutTerminalInteractive != null && layoutTerminalInteractive.getVisibility() == View.VISIBLE) {
                     pollActiveTerminalOutput();
-                    terminalHandler.postDelayed(this, 1500);
+                    terminalHandler.postDelayed(this, TERMINAL_STREAM_INTERVAL_MS);
                 }
             }
         };
-        terminalHandler.postDelayed(terminalPollRunnable, 1500);
+        terminalHandler.postDelayed(terminalPollRunnable, TERMINAL_STREAM_INTERVAL_MS);
     }
 
     private void stopTerminalStreamTimer() {
@@ -3859,10 +3984,22 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void triggerTerminalImmediatePoll() {
+        terminalHandler.post(this::pollActiveTerminalOutput);
+        terminalHandler.postDelayed(this::pollActiveTerminalOutput, 60);
+        terminalHandler.postDelayed(this::pollActiveTerminalOutput, 200);
+    }
+
     private void pollActiveTerminalOutput() {
         if (activeTerminalId == null) return;
         PairedDevice active = DeviceManager.getActiveDevice(this);
         if (active == null) return;
+
+        if (isPollingTerminal) {
+            hasPendingTerminalPoll = true;
+            return;
+        }
+        isPollingTerminal = true;
 
         new Thread(() -> {
             try {
@@ -3944,6 +4081,12 @@ public class MainActivity extends Activity {
                 }
             } catch (Exception e) {
                 isLoadingEarlier = false;
+            } finally {
+                isPollingTerminal = false;
+                if (hasPendingTerminalPoll) {
+                    hasPendingTerminalPoll = false;
+                    terminalHandler.post(this::pollActiveTerminalOutput);
+                }
             }
         }).start();
     }
@@ -3977,16 +4120,23 @@ public class MainActivity extends Activity {
     private void handleSendTerminalInput() {
         if (activeTerminalId == null || etTermInput == null) return;
         String cmd = etTermInput.getText() != null ? etTermInput.getText().toString() : "";
+        isInternalTextUpdate = true;
         etTermInput.setText("");
-        sendTerminalRawText(cmd.isEmpty() ? "\r" : (cmd + "\r"));
+        isInternalTextUpdate = false;
+
+        if (isLiveTypeEnabled) {
+            sendTerminalRawText("\r");
+        } else {
+            sendTerminalRawText(cmd.isEmpty() ? "\r" : (cmd + "\r"));
+        }
     }
 
     private void sendTerminalRawText(String text) {
-        if (activeTerminalId == null) return;
+        if (activeTerminalId == null || text == null || text.isEmpty()) return;
         PairedDevice active = DeviceManager.getActiveDevice(this);
         if (active == null) return;
 
-        new Thread(() -> {
+        terminalSendExecutor.execute(() -> {
             try {
                 String url = active.getBaseUrl() + "/api/terminals/write";
                 JSONObject req = new JSONObject();
@@ -4000,19 +4150,19 @@ public class MainActivity extends Activity {
                         runOnUiThread(() -> Toast.makeText(MainActivity.this, "⚠️ " + msg, Toast.LENGTH_LONG).show());
                     }
                 }
-                pollActiveTerminalOutput();
+                triggerTerminalImmediatePoll();
             } catch (Exception e) {
                 runOnUiThread(() -> Toast.makeText(MainActivity.this, "Send error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
             }
-        }).start();
+        });
     }
 
     private void sendTerminalKey(String keyName) {
-        if (activeTerminalId == null) return;
+        if (activeTerminalId == null || keyName == null) return;
         PairedDevice active = DeviceManager.getActiveDevice(this);
         if (active == null) return;
 
-        new Thread(() -> {
+        terminalSendExecutor.execute(() -> {
             try {
                 String url = active.getBaseUrl() + "/api/terminals/key";
                 JSONObject req = new JSONObject();
@@ -4026,11 +4176,11 @@ public class MainActivity extends Activity {
                         runOnUiThread(() -> Toast.makeText(MainActivity.this, "⚠️ " + msg, Toast.LENGTH_LONG).show());
                     }
                 }
-                pollActiveTerminalOutput();
+                triggerTerminalImmediatePoll();
             } catch (Exception e) {
                 runOnUiThread(() -> Toast.makeText(MainActivity.this, "Key error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
             }
-        }).start();
+        });
     }
 
     private void spawnNewTerminal() {

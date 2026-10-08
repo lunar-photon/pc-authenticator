@@ -963,11 +963,37 @@ def merge_terminal_lines(existing_lines, new_lines):
         return list(new_lines)
     if not new_lines:
         return list(existing_lines)
-    max_overlap = min(len(existing_lines), len(new_lines))
+
+    n_new = len(new_lines)
+    n_exist = len(existing_lines)
+
+    best_match_idx = -1
+    best_match_len = 0
+
+    search_start = max(0, n_exist - n_new - 50)
+    for pos in range(search_start, n_exist):
+        match_count = 0
+        limit = min(n_exist - pos, n_new)
+        for offset in range(limit):
+            if existing_lines[pos + offset] == new_lines[offset]:
+                match_count += 1
+            else:
+                break
+        if match_count > best_match_len and match_count >= 2:
+            best_match_len = match_count
+            best_match_idx = pos
+
+    if best_match_idx != -1:
+        return existing_lines[:best_match_idx] + list(new_lines)
+
+    max_overlap = min(n_exist, n_new)
     for k in range(max_overlap, 0, -1):
         if existing_lines[-k:] == new_lines[:k]:
-            return existing_lines + new_lines[k:]
-    return existing_lines + new_lines
+            return existing_lines[:-k] + list(new_lines)
+
+    if n_exist <= n_new:
+        return list(new_lines)
+    return existing_lines[:-n_new] + list(new_lines)
 
 def read_terminal(term_id, max_lines=35):
     if ':' in term_id and 'org.kde.konsole' in term_id:
@@ -1023,8 +1049,11 @@ def send_terminal_key(term_id, key_name):
         'tab': '\t',
         'up': '\x1b[A',
         'down': '\x1b[B',
+        'left': '\x1b[D',
+        'right': '\x1b[C',
         'enter': '\r',
-        'escape': '\x1b'
+        'escape': '\x1b',
+        'backspace': '\x7f'
     }
     char = KEY_MAP.get(key_name.lower())
     if char:
