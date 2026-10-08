@@ -180,7 +180,6 @@ public class MainActivity extends Activity {
     private Button btnTermLoadEarlier;
 
     private Button btnKeyMode;
-    private Button btnKeyWrap;
     private Button btnKeyCtrlC;
     private Button btnKeyTab;
     private Button btnKeyUp;
@@ -3560,7 +3559,6 @@ public class MainActivity extends Activity {
         }
 
         btnKeyMode = findViewById(R.id.btn_key_mode);
-        btnKeyWrap = findViewById(R.id.btn_key_wrap);
         btnKeyCtrlC = findViewById(R.id.btn_key_ctrl_c);
         btnKeyTab = findViewById(R.id.btn_key_tab);
         btnKeyUp = findViewById(R.id.btn_key_up);
@@ -3602,16 +3600,6 @@ public class MainActivity extends Activity {
             btnKeyMode.setOnClickListener(v -> {
                 isLiveTypeEnabled = !isLiveTypeEnabled;
                 updateLiveModeUI();
-                vibrate(15);
-            });
-        }
-        if (btnKeyWrap != null) {
-            btnKeyWrap.setOnClickListener(v -> {
-                isTerminalWrapEnabled = !isTerminalWrapEnabled;
-                applyTerminalWrapMode();
-                if (tvTermScreen != null && lastLoadedTerminalText != null && !lastLoadedTerminalText.isEmpty()) {
-                    renderColorizedTerminalText(lastLoadedTerminalText);
-                }
                 vibrate(15);
             });
         }
@@ -3759,16 +3747,31 @@ public class MainActivity extends Activity {
         }
     }
 
+    private String getTerminalBaseUrl(PairedDevice active) {
+        if (active == null) return null;
+        if (!DeviceManager.isWifiActive(this)) {
+            return null;
+        }
+        return active.getLocalUrl();
+    }
+
     private void loadTerminalsList() {
         PairedDevice active = DeviceManager.getActiveDevice(this);
         if (active == null) {
             Toast.makeText(this, "No active PC connected", Toast.LENGTH_SHORT).show();
             return;
         }
+        String baseUrl = getTerminalBaseUrl(active);
+        if (baseUrl == null) {
+            Toast.makeText(this, "⚠️ Terminal is restricted to local Wi-Fi / LAN for security.", Toast.LENGTH_SHORT).show();
+            if (containerTerminalsList != null) containerTerminalsList.removeAllViews();
+            if (layoutTerminalsEmpty != null) layoutTerminalsEmpty.setVisibility(View.VISIBLE);
+            return;
+        }
 
         new Thread(() -> {
             try {
-                String url = active.getBaseUrl() + "/api/terminals/list";
+                String url = baseUrl + "/api/terminals/list";
                 String res = NetworkUtils.httpGetWithAuth(url, active.authToken, 4000);
                 if (res != null) {
                     JSONObject obj = new JSONObject(res);
@@ -4041,11 +4044,6 @@ public class MainActivity extends Activity {
             }
             tvTermScreen.setHorizontallyScrolling(true);
         }
-
-        if (btnKeyWrap != null) {
-            btnKeyWrap.setText(isTerminalWrapEnabled ? "🔄 Wrap: ON" : "↔ Wrap: OFF");
-            btnKeyWrap.setTextColor(getColor(isTerminalWrapEnabled ? R.color.accent_cyan : R.color.text_muted));
-        }
     }
 
     private int getTerminalTargetColumns() {
@@ -4104,6 +4102,8 @@ public class MainActivity extends Activity {
         if (activeTerminalId == null) return;
         PairedDevice active = DeviceManager.getActiveDevice(this);
         if (active == null) return;
+        String baseUrl = getTerminalBaseUrl(active);
+        if (baseUrl == null) return;
 
         if (isPollingTerminal) {
             hasPendingTerminalPoll = true;
@@ -4114,7 +4114,7 @@ public class MainActivity extends Activity {
         new Thread(() -> {
             try {
                 String encodedId = java.net.URLEncoder.encode(activeTerminalId, "UTF-8");
-                String url = active.getBaseUrl() + "/api/terminals/read?id=" + encodedId + "&lines=" + currentTerminalLinesToFetch;
+                String url = baseUrl + "/api/terminals/read?id=" + encodedId + "&lines=" + currentTerminalLinesToFetch;
                 String res = NetworkUtils.httpGetWithAuth(url, active.authToken, 3000);
                 if (res != null) {
                     JSONObject obj = new JSONObject(res);
@@ -4245,10 +4245,15 @@ public class MainActivity extends Activity {
         if (activeTerminalId == null || text == null || text.isEmpty()) return;
         PairedDevice active = DeviceManager.getActiveDevice(this);
         if (active == null) return;
+        String baseUrl = getTerminalBaseUrl(active);
+        if (baseUrl == null) {
+            Toast.makeText(this, "⚠️ Terminal is restricted to local Wi-Fi / LAN for security.", Toast.LENGTH_SHORT).show();
+            return;
+        }
 
         terminalSendExecutor.execute(() -> {
             try {
-                String url = active.getBaseUrl() + "/api/terminals/write";
+                String url = baseUrl + "/api/terminals/write";
                 JSONObject req = new JSONObject();
                 req.put("id", activeTerminalId);
                 req.put("text", text);
@@ -4271,10 +4276,15 @@ public class MainActivity extends Activity {
         if (activeTerminalId == null || keyName == null) return;
         PairedDevice active = DeviceManager.getActiveDevice(this);
         if (active == null) return;
+        String baseUrl = getTerminalBaseUrl(active);
+        if (baseUrl == null) {
+            Toast.makeText(this, "⚠️ Terminal is restricted to local Wi-Fi / LAN for security.", Toast.LENGTH_SHORT).show();
+            return;
+        }
 
         terminalSendExecutor.execute(() -> {
             try {
-                String url = active.getBaseUrl() + "/api/terminals/key";
+                String url = baseUrl + "/api/terminals/key";
                 JSONObject req = new JSONObject();
                 req.put("id", activeTerminalId);
                 req.put("key", keyName);
@@ -4299,11 +4309,16 @@ public class MainActivity extends Activity {
             Toast.makeText(this, "No active PC connected", Toast.LENGTH_SHORT).show();
             return;
         }
+        String baseUrl = getTerminalBaseUrl(active);
+        if (baseUrl == null) {
+            Toast.makeText(this, "⚠️ Terminal is restricted to local Wi-Fi / LAN for security.", Toast.LENGTH_SHORT).show();
+            return;
+        }
 
         Toast.makeText(this, "⚡ Spawning new terminal on PC...", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             try {
-                String url = active.getBaseUrl() + "/api/terminals/new";
+                String url = baseUrl + "/api/terminals/new";
                 JSONObject req = new JSONObject();
                 String res = NetworkUtils.httpPostJsonWithAuth(url, active.authToken, req.toString(), 4000);
                 runOnUiThread(() -> {

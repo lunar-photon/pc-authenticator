@@ -1190,24 +1190,10 @@
                             android:layout_marginEnd="3dp" />
 
                         <Button
-                            android:id="@+id/btn_key_wrap"
-                            android:layout_width="0dp"
-                            android:layout_height="match_parent"
-                            android:layout_weight="1.1"
-                            android:text="🔄 Wrap: ON"
-                            android:textSize="9.5sp"
-                            android:textStyle="bold"
-                            android:textColor="@color/accent_cyan"
-                            android:background="@drawable/card_bg"
-                            android:paddingStart="4dp"
-                            android:paddingEnd="4dp"
-                            android:layout_marginEnd="3dp" />
-
-                        <Button
                             android:id="@+id/btn_key_tab"
                             android:layout_width="0dp"
                             android:layout_height="match_parent"
-                            android:layout_weight="0.8"
+                            android:layout_weight="0.9"
                             android:text="Tab"
                             android:textSize="10sp"
                             android:textStyle="bold"
@@ -1221,7 +1207,7 @@
                             android:id="@+id/btn_key_up"
                             android:layout_width="0dp"
                             android:layout_height="match_parent"
-                            android:layout_weight="0.7"
+                            android:layout_weight="0.8"
                             android:text="↑"
                             android:textSize="12sp"
                             android:textStyle="bold"
@@ -1235,7 +1221,7 @@
                             android:id="@+id/btn_key_down"
                             android:layout_width="0dp"
                             android:layout_height="match_parent"
-                            android:layout_weight="0.7"
+                            android:layout_weight="0.8"
                             android:text="↓"
                             android:textSize="12sp"
                             android:textStyle="bold"
@@ -1249,7 +1235,7 @@
                             android:id="@+id/btn_key_esc"
                             android:layout_width="0dp"
                             android:layout_height="match_parent"
-                            android:layout_weight="0.8"
+                            android:layout_weight="0.9"
                             android:text="Esc"
                             android:textSize="10sp"
                             android:textStyle="bold"

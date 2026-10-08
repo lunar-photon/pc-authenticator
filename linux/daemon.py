@@ -17,6 +17,7 @@ import mimetypes
 import struct
 import fcntl
 import re
+import ipaddress
 from urllib.parse import urlparse, parse_qs, unquote, quote
 import urllib.request
 import urllib.error
@@ -106,6 +107,16 @@ def is_tunnel_request(handler):
         headers.get('ngrok-agent-ips') or
         (headers.get('X-Forwarded-Proto') and headers.get('X-Forwarded-For'))
     )
+
+def is_lan_or_wifi_request(handler):
+    if is_tunnel_request(handler):
+        return False
+    client_ip = handler.client_address[0]
+    try:
+        ip = ipaddress.ip_address(client_ip)
+        return ip.is_private or ip.is_loopback or ip.is_link_local
+    except Exception:
+        return False
 
 def get_effective_client_ip(handler):
     if is_tunnel_request(handler):
@@ -2247,6 +2258,9 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             return
 
         elif path == '/api/terminals/list':
+            if not is_lan_or_wifi_request(self):
+                self.send_json({"error": "forbidden", "message": "Terminal is only accessible over local Wi-Fi / LAN for security."}, status=403)
+                return
             cfg = load_config()
             client_info, token = authenticate_client(self, cfg)
             if not client_info:
@@ -2256,6 +2270,9 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             return
 
         elif path == '/api/terminals/read':
+            if not is_lan_or_wifi_request(self):
+                self.send_json({"error": "forbidden", "message": "Terminal is only accessible over local Wi-Fi / LAN for security."}, status=403)
+                return
             cfg = load_config()
             client_info, token = authenticate_client(self, cfg)
             if not client_info:
@@ -3071,6 +3088,9 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
 
         # Terminal Endpoints
         elif path == '/api/terminals/write':
+            if not is_lan_or_wifi_request(self):
+                self.send_json({"error": "forbidden", "message": "Terminal is only accessible over local Wi-Fi / LAN for security."}, status=403)
+                return
             cfg = load_config()
             client_info, token = authenticate_client(self, cfg)
             if not client_info:
@@ -3083,6 +3103,9 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             return
 
         elif path == '/api/terminals/key':
+            if not is_lan_or_wifi_request(self):
+                self.send_json({"error": "forbidden", "message": "Terminal is only accessible over local Wi-Fi / LAN for security."}, status=403)
+                return
             cfg = load_config()
             client_info, token = authenticate_client(self, cfg)
             if not client_info:
@@ -3095,6 +3118,9 @@ class AuthenticatorHandler(BaseHTTPRequestHandler):
             return
 
         elif path == '/api/terminals/new':
+            if not is_lan_or_wifi_request(self):
+                self.send_json({"error": "forbidden", "message": "Terminal is only accessible over local Wi-Fi / LAN for security."}, status=403)
+                return
             cfg = load_config()
             client_info, token = authenticate_client(self, cfg)
             if not client_info:
