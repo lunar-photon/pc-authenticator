@@ -12,19 +12,23 @@ import java.util.regex.Pattern;
 
 public class TerminalColorizer {
 
-    private static final int COLOR_DEFAULT = Color.parseColor("#E2E8F0");      // Crisp off-white
-    private static final int COLOR_MUTED = Color.parseColor("#64748B");        // Slate 500
-    private static final int COLOR_DIVIDER = Color.parseColor("#334155");      // Slate 700
-    private static final int COLOR_CYAN = Color.parseColor("#38BDF8");         // Sky 400
-    private static final int COLOR_LIGHT_CYAN = Color.parseColor("#7DD3FC");   // Sky 300
-    private static final int COLOR_GREEN = Color.parseColor("#34D399");        // Emerald 400
-    private static final int COLOR_BRIGHT_GREEN = Color.parseColor("#10B981"); // Emerald 500
-    private static final int COLOR_RED = Color.parseColor("#F87171");          // Red 400
-    private static final int COLOR_YELLOW = Color.parseColor("#FBBF24");       // Amber 400
-    private static final int COLOR_AMBER = Color.parseColor("#F59E0B");        // Amber 500
-    private static final int COLOR_PURPLE = Color.parseColor("#C084FC");       // Purple 400
-    private static final int COLOR_VIOLET = Color.parseColor("#A78BFA");       // Violet 400
-    private static final int COLOR_WHITE = Color.parseColor("#FFFFFF");        // Pure White
+    // --- Catppuccin Mocha Palette (matches desktop Konsole theme) ---
+    private static final int MOCHA_TEXT = Color.parseColor("#CDD6F4");        // Soft warm text
+    private static final int MOCHA_SUBTEXT = Color.parseColor("#A6ADC8");     // Subtext 1
+    private static final int MOCHA_MUTED = Color.parseColor("#6C7086");       // Overlay 0
+    private static final int MOCHA_SURFACE = Color.parseColor("#45475A");     // Surface 1 (dividers)
+    private static final int MOCHA_RED = Color.parseColor("#F38BA8");         // Red
+    private static final int MOCHA_MAROON = Color.parseColor("#EBA0AC");      // Maroon
+    private static final int MOCHA_PEACH = Color.parseColor("#FAB387");       // Peach / Orange
+    private static final int MOCHA_YELLOW = Color.parseColor("#F9E2AF");      // Yellow / Gold
+    private static final int MOCHA_GREEN = Color.parseColor("#A6E3A1");       // Green
+    private static final int MOCHA_TEAL = Color.parseColor("#94E2D5");        // Teal
+    private static final int MOCHA_SKY = Color.parseColor("#89DCEB");         // Sky Cyan
+    private static final int MOCHA_SAPPHIRE = Color.parseColor("#74C7EC");    // Sapphire
+    private static final int MOCHA_BLUE = Color.parseColor("#89B4FA");        // Blue
+    private static final int MOCHA_LAVENDER = Color.parseColor("#B4BEFE");    // Lavender
+    private static final int MOCHA_MAUVE = Color.parseColor("#CBA6F7");       // Mauve / Purple
+    private static final int MOCHA_WHITE = Color.parseColor("#FFFFFF");       // Pure White
 
     private static final Pattern ANSI_PATTERN = Pattern.compile("\u001B\\[([0-9;]*)m");
     private static final Pattern ANSI_OTHER_PATTERN = Pattern.compile("\u001B\\[[?0-9;]*[a-zA-Z]");
@@ -34,13 +38,16 @@ public class TerminalColorizer {
     private static final Pattern SPINNER_PATTERN = Pattern.compile("^[⣻⡿⠋⠙⠹]\\s+(.*)$");
     private static final Pattern PROMPT_PATTERN = Pattern.compile("^([>$❯➜])\\s*(.*)$");
     private static final Pattern SHELL_PROMPT_PATTERN = Pattern.compile("^([a-zA-Z0-9_.\\-]+@[a-zA-Z0-9_.\\-]+:[^$#]*[$#])\\s*(.*)$");
-    private static final Pattern PATH_PATTERN = Pattern.compile("(~?/[a-zA-Z0-9_.\\-/]+|https?://[a-zA-Z0-9_.\\-/]+)");
+    private static final Pattern LIST_ITEM_PATTERN = Pattern.compile("^(\\s*[-•*]\\s+)([^:]+:)(.*)$");
+    private static final Pattern SECTION_HEADER_PATTERN = Pattern.compile("^(\\s*(?:#{1,6}\\s+)?)([A-Z][A-Za-z0-9_\\s&\\-/]+:?)$");
+    private static final Pattern PATH_OR_CODE_PATTERN = Pattern.compile("(`[^`]+`|~?/[a-zA-Z0-9_.\\-/]+|[a-zA-Z0-9_.\\-]+\\.(?:py|md|java|json|xml|sh|txt|apk|cpp|h|rs|go|js|ts)|https?://[a-zA-Z0-9_.\\-/]+)");
+    private static final Pattern NUMBER_METRIC_PATTERN = Pattern.compile("\\b(\\d+(?:\\.\\d+)?(?:k|ms|s|m|%|lines|tokens)?)\\b");
 
     /**
-     * Pre-formats raw terminal text for clean display on a mobile viewport:
-     * - Truncates excessively wide box-drawing divider lines (e.g. 137 dashes) to targetColumns
-     * - Collapses huge internal whitespace paddings (used by desktop TUIs to right-align status items)
-     * - Strips non-color ANSI control characters
+     * Formats terminal text for mobile display:
+     * - Trims oversized box-drawing divider lines (137 dashes) down to targetColumns so they never blow out screen width
+     * - Strips trailing whitespace on every line so lines that terminate with '...' have ZERO phantom empty space after them
+     * - Collapses huge internal whitespace gaps (used by desktop TUIs to right-align items) so footers fit on phone
      */
     public static String formatTerminalText(String text, boolean wrapMode, int targetColumns) {
         if (text == null || text.isEmpty()) return "";
@@ -52,29 +59,32 @@ public class TerminalColorizer {
         for (int i = 0; i < lines.length; i++) {
             String line = lines[i];
 
-            if (wrapMode) {
-                String trimmed = line.trim();
-                // 1. Divider line adaptation: fit line width to avoid 4-line wrapped borders
-                if (DIVIDER_PATTERN.matcher(trimmed).matches()) {
-                    char ch = trimmed.charAt(0);
-                    StringBuilder div = new StringBuilder();
-                    for (int c = 0; c < maxCols; c++) {
-                        div.append(ch);
-                    }
-                    line = div.toString();
-                } else if (line.length() > 20) {
-                    // 2. Collapse internal runs of 6+ spaces in the middle of a line (e.g. TUI status footers)
-                    // preserve leading spaces (code indent)
-                    int firstNonSpace = 0;
-                    while (firstNonSpace < line.length() && line.charAt(firstNonSpace) == ' ') {
-                        firstNonSpace++;
-                    }
-                    if (firstNonSpace < line.length()) {
-                        String indent = line.substring(0, firstNonSpace);
-                        String body = line.substring(firstNonSpace);
-                        body = body.replaceAll(" {6,}", "   ");
-                        line = indent + body;
-                    }
+            // Always strip trailing whitespace: eliminates the vast empty space after '...' or short lines
+            line = line.replaceAll("\\s+$", "");
+
+            String trimmed = line.trim();
+
+            // 1. Divider line adaptation: fit line width to avoid 4-line wrapped borders or 137-col horizontal sprawl
+            if (DIVIDER_PATTERN.matcher(trimmed).matches()) {
+                char ch = trimmed.charAt(0);
+                StringBuilder div = new StringBuilder();
+                int count = Math.min(maxCols, 80);
+                for (int c = 0; c < count; c++) {
+                    div.append(ch);
+                }
+                line = div.toString();
+            } else if (line.length() > 20) {
+                // 2. Collapse internal runs of 6+ spaces in the middle of a line (e.g. desktop TUI status footers)
+                // preserve leading spaces (code indent)
+                int firstNonSpace = 0;
+                while (firstNonSpace < line.length() && line.charAt(firstNonSpace) == ' ') {
+                    firstNonSpace++;
+                }
+                if (firstNonSpace < line.length()) {
+                    String indent = line.substring(0, firstNonSpace);
+                    String body = line.substring(firstNonSpace);
+                    body = body.replaceAll(" {6,}", "   ");
+                    line = indent + body;
                 }
             }
 
@@ -87,16 +97,15 @@ public class TerminalColorizer {
     }
 
     /**
-     * Colorizes terminal text into a rich Spannable:
+     * Colorizes terminal text into a rich Spannable using Catppuccin Mocha colors:
      * - Parses ANSI escape codes if present
-     * - Falls back to semantic terminal highlighting for plain-text streams (Konsole getAllDisplayedText)
+     * - Applies full semantic syntax highlighting for active tools, thinking blocks, responses, lists, prompts, and footers
      */
     public static CharSequence colorize(String text, boolean wrapMode, int targetColumns) {
         if (text == null || text.isEmpty()) return "";
 
         String formatted = formatTerminalText(text, wrapMode, targetColumns);
 
-        // Check if string contains ANSI color codes
         if (formatted.contains("\u001B[")) {
             return parseAnsiColors(formatted);
         }
@@ -105,14 +114,13 @@ public class TerminalColorizer {
     }
 
     private static CharSequence parseAnsiColors(String text) {
-        // Strip non-color ANSI control codes
         String clean = ANSI_OTHER_PATTERN.matcher(text).replaceAll("");
 
         SpannableStringBuilder ssb = new SpannableStringBuilder();
         Matcher matcher = ANSI_PATTERN.matcher(clean);
 
         int lastEnd = 0;
-        int currentFg = COLOR_DEFAULT;
+        int currentFg = MOCHA_TEXT;
         boolean isBold = false;
         boolean isUnderline = false;
 
@@ -125,7 +133,7 @@ public class TerminalColorizer {
 
             String params = matcher.group(1);
             if (params == null || params.isEmpty() || "0".equals(params)) {
-                currentFg = COLOR_DEFAULT;
+                currentFg = MOCHA_TEXT;
                 isBold = false;
                 isUnderline = false;
             } else {
@@ -137,7 +145,7 @@ public class TerminalColorizer {
                     } catch (NumberFormatException ignored) {}
 
                     if (code == 0) {
-                        currentFg = COLOR_DEFAULT;
+                        currentFg = MOCHA_TEXT;
                         isBold = false;
                         isUnderline = false;
                     } else if (code == 1) {
@@ -147,18 +155,16 @@ public class TerminalColorizer {
                     } else if (code >= 30 && code <= 37) {
                         currentFg = getAnsiStandardColor(code - 30, false);
                     } else if (code == 39) {
-                        currentFg = COLOR_DEFAULT;
+                        currentFg = MOCHA_TEXT;
                     } else if (code >= 90 && code <= 97) {
                         currentFg = getAnsiStandardColor(code - 90, true);
                     } else if (code == 38 && i + 2 < codes.length && "5".equals(codes[i + 1])) {
-                        // 256 color
                         try {
                             int c256 = Integer.parseInt(codes[i + 2]);
                             currentFg = get256Color(c256);
                             i += 2;
                         } catch (Exception ignored) {}
                     } else if (code == 38 && i + 4 < codes.length && "2".equals(codes[i + 1])) {
-                        // Truecolor rgb
                         try {
                             int r = Integer.parseInt(codes[i + 2]);
                             int g = Integer.parseInt(codes[i + 3]);
@@ -192,14 +198,14 @@ public class TerminalColorizer {
 
     private static int getAnsiStandardColor(int idx, boolean bright) {
         switch (idx) {
-            case 0: return bright ? COLOR_MUTED : Color.parseColor("#475569");
-            case 1: return bright ? COLOR_RED : Color.parseColor("#DC2626");
-            case 2: return bright ? COLOR_GREEN : Color.parseColor("#16A34A");
-            case 3: return bright ? COLOR_YELLOW : Color.parseColor("#D97706");
-            case 4: return bright ? Color.parseColor("#60A5FA") : Color.parseColor("#2563EB");
-            case 5: return bright ? COLOR_PURPLE : Color.parseColor("#9333EA");
-            case 6: return bright ? COLOR_CYAN : Color.parseColor("#0891B2");
-            case 7: default: return bright ? COLOR_WHITE : COLOR_DEFAULT;
+            case 0: return bright ? MOCHA_MUTED : Color.parseColor("#45475A");
+            case 1: return bright ? MOCHA_RED : MOCHA_MAROON;
+            case 2: return bright ? MOCHA_GREEN : MOCHA_TEAL;
+            case 3: return bright ? MOCHA_YELLOW : MOCHA_PEACH;
+            case 4: return bright ? MOCHA_BLUE : MOCHA_SAPPHIRE;
+            case 5: return bright ? MOCHA_MAUVE : MOCHA_LAVENDER;
+            case 6: return bright ? MOCHA_SKY : MOCHA_TEAL;
+            case 7: default: return bright ? MOCHA_WHITE : MOCHA_TEXT;
         }
     }
 
@@ -219,7 +225,8 @@ public class TerminalColorizer {
     }
 
     /**
-     * Semantic syntax highlighting for plain-text terminal output (Konsole Session.getAllDisplayedText).
+     * Semantic syntax highlighting for plain-text terminal output (Konsole getAllDisplayedText).
+     * Works both when terminal is active (tools/spinners) and when idle (assistant response, markdown, lists, prompts).
      */
     private static CharSequence parseSemanticColors(String text) {
         SpannableStringBuilder ssb = new SpannableStringBuilder();
@@ -244,151 +251,223 @@ public class TerminalColorizer {
         String trimmed = line.trim();
         if (trimmed.isEmpty()) return;
 
-        // 1. Box-drawing divider lines
+        // 1. Box-drawing divider lines (Catppuccin Surface 1)
         if (DIVIDER_PATTERN.matcher(trimmed).matches()) {
-            ssb.setSpan(new ForegroundColorSpan(COLOR_DIVIDER), s, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            ssb.setSpan(new ForegroundColorSpan(MOCHA_SURFACE), s, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
             return;
         }
 
-        // 2. Tool / Agent calls: ● Bash(...), ● Read(...), etc.
+        // 2. Active Tool / Agent calls: ● Bash(...), ● Read(...), etc.
         Matcher toolM = TOOL_PATTERN.matcher(trimmed);
         if (toolM.matches()) {
             int relCircle = line.indexOf(trimmed.charAt(0));
             if (relCircle >= 0) {
-                // Badge circle: Cyan
-                ssb.setSpan(new ForegroundColorSpan(COLOR_CYAN), s + relCircle, s + relCircle + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                ssb.setSpan(new ForegroundColorSpan(MOCHA_SKY), s + relCircle, s + relCircle + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
                 ssb.setSpan(new StyleSpan(Typeface.BOLD), s + relCircle, s + relCircle + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
 
                 String toolName = toolM.group(1);
                 int relTool = line.indexOf(toolName, relCircle + 1);
                 if (relTool >= 0) {
-                    // Tool Name: Bright White Bold
-                    ssb.setSpan(new ForegroundColorSpan(COLOR_WHITE), s + relTool, s + relTool + toolName.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    ssb.setSpan(new ForegroundColorSpan(MOCHA_WHITE), s + relTool, s + relTool + toolName.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
                     ssb.setSpan(new StyleSpan(Typeface.BOLD), s + relTool, s + relTool + toolName.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
 
                     int relArgs = relTool + toolName.length();
-                    // Args / Target: Light Cyan
-                    ssb.setSpan(new ForegroundColorSpan(COLOR_LIGHT_CYAN), s + relArgs, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    ssb.setSpan(new ForegroundColorSpan(MOCHA_SAPPHIRE), s + relArgs, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
 
-                    // Shortcut / hint: e.g. (ctrl+o to expand)
                     int relHint = line.indexOf("(ctrl+o", relArgs);
                     if (relHint >= 0) {
-                        ssb.setSpan(new ForegroundColorSpan(COLOR_MUTED), s + relHint, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                        ssb.setSpan(new ForegroundColorSpan(MOCHA_MUTED), s + relHint, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
                     }
                     return;
                 }
             }
         }
 
-        // 3. Completed / success badge
-        if (trimmed.startsWith("✔") || trimmed.startsWith("✓")) {
-            ssb.setSpan(new ForegroundColorSpan(COLOR_BRIGHT_GREEN), s, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        // 3. Response summary bullet line: ● The handoff is in ...
+        if (trimmed.startsWith("●") || trimmed.startsWith("○")) {
+            int relCircle = line.indexOf(trimmed.charAt(0));
+            if (relCircle >= 0) {
+                ssb.setSpan(new ForegroundColorSpan(MOCHA_MAUVE), s + relCircle, s + relCircle + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                ssb.setSpan(new StyleSpan(Typeface.BOLD), s + relCircle, s + relCircle + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+            ssb.setSpan(new ForegroundColorSpan(MOCHA_TEXT), s + relCircle + 1, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            highlightPathsAndMetrics(ssb, line, s, e);
             return;
         }
 
-        // 4. Failed / error badge
-        if (trimmed.startsWith("✖") || trimmed.startsWith("✗")) {
-            ssb.setSpan(new ForegroundColorSpan(COLOR_RED), s, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-            return;
-        }
-
-        // 5. Thinking block: ▸ Thought for ...
+        // 4. Thinking block: ▸ Thought for ...
         Matcher thoughtM = THOUGHT_PATTERN.matcher(trimmed);
         if (thoughtM.matches()) {
             int relIcon = line.indexOf('▸');
             if (relIcon >= 0) {
-                ssb.setSpan(new ForegroundColorSpan(COLOR_PURPLE), s + relIcon, s + relIcon + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                ssb.setSpan(new ForegroundColorSpan(MOCHA_MAUVE), s + relIcon, s + relIcon + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
                 ssb.setSpan(new StyleSpan(Typeface.BOLD), s + relIcon, s + relIcon + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
             int relLabel = line.indexOf("Thought for");
             if (relLabel >= 0) {
-                ssb.setSpan(new ForegroundColorSpan(COLOR_VIOLET), s + relLabel, s + relLabel + 11, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-                // Time & tokens in Amber
-                ssb.setSpan(new ForegroundColorSpan(COLOR_YELLOW), s + relLabel + 11, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                ssb.setSpan(new ForegroundColorSpan(MOCHA_LAVENDER), s + relLabel, s + relLabel + 11, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                ssb.setSpan(new ForegroundColorSpan(MOCHA_PEACH), s + relLabel + 11, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
             return;
         }
 
-        // 6. Spinner / In-progress: ⣻ Running command...
+        // 5. Active Spinner: ⣻ Running command...
         Matcher spinnerM = SPINNER_PATTERN.matcher(trimmed);
         if (spinnerM.matches()) {
             int relSpin = line.indexOf(trimmed.charAt(0));
             if (relSpin >= 0) {
-                ssb.setSpan(new ForegroundColorSpan(COLOR_AMBER), s + relSpin, s + relSpin + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-                ssb.setSpan(new ForegroundColorSpan(COLOR_YELLOW), s + relSpin + 1, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                ssb.setSpan(new ForegroundColorSpan(MOCHA_PEACH), s + relSpin, s + relSpin + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                ssb.setSpan(new ForegroundColorSpan(MOCHA_YELLOW), s + relSpin + 1, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
             return;
         }
 
-        // 7. Footer status bar: esc to cancel ... Gemini 3.8 Flash · high
+        // 6. Work Metric line: ✻ Worked for 59s · done 11:46 am
+        if (trimmed.startsWith("✻") || trimmed.contains("Worked for")) {
+            int relIcon = line.indexOf("✻");
+            if (relIcon >= 0) {
+                ssb.setSpan(new ForegroundColorSpan(MOCHA_MAUVE), s + relIcon, s + relIcon + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+            ssb.setSpan(new ForegroundColorSpan(MOCHA_LAVENDER), s, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            highlightPathsAndMetrics(ssb, line, s, e);
+            return;
+        }
+
+        // 7. Checkmarks: ✔ Update installed · Restart to update
+        if (trimmed.contains("✔") || trimmed.contains("✓")) {
+            int relCheck = Math.max(line.indexOf("✔"), line.indexOf("✓"));
+            if (relCheck >= 0) {
+                ssb.setSpan(new ForegroundColorSpan(MOCHA_GREEN), s + relCheck, s + relCheck + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                ssb.setSpan(new StyleSpan(Typeface.BOLD), s + relCheck, s + relCheck + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                ssb.setSpan(new ForegroundColorSpan(MOCHA_GREEN), s + relCheck + 1, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+            return;
+        }
+
+        // 8. Crossmarks / failures
+        if (trimmed.contains("✖") || trimmed.contains("✗")) {
+            ssb.setSpan(new ForegroundColorSpan(MOCHA_RED), s, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            return;
+        }
+
+        // 9. Status footers: ⏵⏵ auto mode on ...
+        if (trimmed.contains("⏵")) {
+            ssb.setSpan(new ForegroundColorSpan(MOCHA_SAPPHIRE), s, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            return;
+        }
+
+        // 10. Footers: esc to cancel ... Gemini 3.8 Flash · high
         if (trimmed.contains("esc to cancel")) {
             int relEsc = line.indexOf("esc to cancel");
             if (relEsc >= 0) {
-                ssb.setSpan(new ForegroundColorSpan(COLOR_MUTED), s, s + relEsc + 13, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                ssb.setSpan(new ForegroundColorSpan(MOCHA_MUTED), s, s + relEsc + 13, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
-            // Model tag
             int relModel = Math.max(line.indexOf("Gemini"), Math.max(line.indexOf("claude"), line.indexOf("gpt")));
             if (relModel >= 0) {
-                ssb.setSpan(new ForegroundColorSpan(COLOR_GREEN), s + relModel, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                ssb.setSpan(new ForegroundColorSpan(MOCHA_GREEN), s + relModel, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
                 ssb.setSpan(new StyleSpan(Typeface.BOLD), s + relModel, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
             return;
         }
 
-        // 8. Shell prompt: user@host:~$ cmd
+        // 11. Shell prompts: user@host:path$ cmd
         Matcher shellM = SHELL_PROMPT_PATTERN.matcher(trimmed);
         if (shellM.matches()) {
             String promptPart = shellM.group(1);
             int relPrompt = line.indexOf(promptPart);
             if (relPrompt >= 0) {
-                ssb.setSpan(new ForegroundColorSpan(COLOR_GREEN), s + relPrompt, s + relPrompt + promptPart.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                ssb.setSpan(new ForegroundColorSpan(MOCHA_GREEN), s + relPrompt, s + relPrompt + promptPart.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
                 ssb.setSpan(new StyleSpan(Typeface.BOLD), s + relPrompt, s + relPrompt + promptPart.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-                // Command typed in White
-                ssb.setSpan(new ForegroundColorSpan(COLOR_WHITE), s + relPrompt + promptPart.length(), e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                ssb.setSpan(new ForegroundColorSpan(MOCHA_WHITE), s + relPrompt + promptPart.length(), e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                ssb.setSpan(new StyleSpan(Typeface.BOLD), s + relPrompt + promptPart.length(), e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
                 return;
             }
         }
 
-        // 9. Prompt symbol: > cmd or $ cmd
+        // 12. Prompt symbols: > cmd or ❯ cmd or $ cmd
         Matcher promptM = PROMPT_PATTERN.matcher(trimmed);
         if (promptM.matches()) {
             int relSym = line.indexOf(trimmed.charAt(0));
             if (relSym >= 0) {
-                ssb.setSpan(new ForegroundColorSpan(COLOR_CYAN), s + relSym, s + relSym + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                ssb.setSpan(new ForegroundColorSpan(MOCHA_YELLOW), s + relSym, s + relSym + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
                 ssb.setSpan(new StyleSpan(Typeface.BOLD), s + relSym, s + relSym + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-                ssb.setSpan(new ForegroundColorSpan(COLOR_WHITE), s + relSym + 1, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                ssb.setSpan(new ForegroundColorSpan(MOCHA_WHITE), s + relSym + 1, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                ssb.setSpan(new StyleSpan(Typeface.BOLD), s + relSym + 1, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
                 return;
             }
         }
 
-        // 10. Errors & Exceptions
+        // 13. Bullet lists with labels: - The project: ... or • Deliverables: ...
+        Matcher listM = LIST_ITEM_PATTERN.matcher(line);
+        if (listM.matches()) {
+            String bullet = listM.group(1);
+            String label = listM.group(2);
+            int relBullet = line.indexOf(bullet);
+            int relLabel = relBullet + bullet.length();
+            int relRest = relLabel + label.length();
+
+            // Bullet in Mauve
+            ssb.setSpan(new ForegroundColorSpan(MOCHA_MAUVE), s + relBullet, s + relLabel, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            // Label in Peach/Gold Bold
+            ssb.setSpan(new ForegroundColorSpan(MOCHA_PEACH), s + relLabel, s + relRest, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            ssb.setSpan(new StyleSpan(Typeface.BOLD), s + relLabel, s + relRest, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            // Rest of text in Catppuccin Text
+            ssb.setSpan(new ForegroundColorSpan(MOCHA_TEXT), s + relRest, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            highlightPathsAndMetrics(ssb, line, s + relRest, e);
+            return;
+        }
+
+        // 14. Section Headers: ### 3. Build & Deployment or It covers:
+        Matcher secM = SECTION_HEADER_PATTERN.matcher(trimmed);
+        if (secM.matches()) {
+            ssb.setSpan(new ForegroundColorSpan(MOCHA_MAUVE), s, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            ssb.setSpan(new StyleSpan(Typeface.BOLD), s, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            return;
+        }
+
+        // 15. Errors & Exceptions
         String lower = trimmed.toLowerCase();
         if (lower.startsWith("error:") || lower.startsWith("fatal:") || lower.contains("exception") || lower.contains("traceback (most recent") || lower.startsWith("failed")) {
-            ssb.setSpan(new ForegroundColorSpan(COLOR_RED), s, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            ssb.setSpan(new ForegroundColorSpan(MOCHA_RED), s, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
             return;
         }
 
-        // 11. Warnings
+        // 16. Warnings
         if (lower.startsWith("warning:") || lower.startsWith("warn:")) {
-            ssb.setSpan(new ForegroundColorSpan(COLOR_YELLOW), s, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            ssb.setSpan(new ForegroundColorSpan(MOCHA_YELLOW), s, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
             return;
         }
 
-        // 12. Success
+        // 17. Success
         if (lower.startsWith("success") || lower.contains("successfully") || lower.equals("ok") || lower.startsWith("passed")) {
-            ssb.setSpan(new ForegroundColorSpan(COLOR_GREEN), s, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            ssb.setSpan(new ForegroundColorSpan(MOCHA_GREEN), s, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
             return;
         }
 
-        // 13. Default line text: Crisp off-white
-        ssb.setSpan(new ForegroundColorSpan(COLOR_DEFAULT), s, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        // 18. Default regular text
+        ssb.setSpan(new ForegroundColorSpan(MOCHA_TEXT), s, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        highlightPathsAndMetrics(ssb, line, s, e);
+    }
 
-        // Highlight any file paths or URLs inside the line
-        Matcher pathM = PATH_PATTERN.matcher(line);
+    private static void highlightPathsAndMetrics(SpannableStringBuilder ssb, String line, int s, int e) {
+        // Highlight file paths, code tokens, and URLs
+        Matcher pathM = PATH_OR_CODE_PATTERN.matcher(line);
         while (pathM.find()) {
             int pStart = s + pathM.start();
             int pEnd = s + pathM.end();
-            ssb.setSpan(new ForegroundColorSpan(COLOR_CYAN), pStart, pEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            if (pStart >= s && pEnd <= e) {
+                ssb.setSpan(new ForegroundColorSpan(MOCHA_TEAL), pStart, pEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+        }
+
+        // Highlight durations, numbers, token metrics
+        Matcher numM = NUMBER_METRIC_PATTERN.matcher(line);
+        while (numM.find()) {
+            int nStart = s + numM.start();
+            int nEnd = s + numM.end();
+            if (nStart >= s && nEnd <= e) {
+                ssb.setSpan(new ForegroundColorSpan(MOCHA_PEACH), nStart, nEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
         }
     }
 }
