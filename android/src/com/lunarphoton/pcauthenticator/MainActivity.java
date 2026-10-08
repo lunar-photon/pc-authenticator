@@ -3406,6 +3406,19 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
 
+    @Override
+    public void onBackPressed() {
+        if (activeTerminalId != null && layoutTerminalInteractive != null && layoutTerminalInteractive.getVisibility() == View.VISIBLE) {
+            closeTerminalInteractive();
+            return;
+        }
+        if (mainViewFlipper != null && mainViewFlipper.getDisplayedChild() == 1) {
+            switchToPanel(0);
+            return;
+        }
+        super.onBackPressed();
+    }
+
     // --- Live Terminals Panel Implementation ---
     private void initTerminalsPanel() {
         mainViewFlipper = findViewById(R.id.main_view_flipper);

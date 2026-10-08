@@ -1136,7 +1136,7 @@
                     android:layout_weight="1"
                     android:minHeight="120dp"
                     android:scrollbars="vertical"
-                    android:background="#1E1E2E"
+                    android:background="#0A0F1D"
                     android:fillViewport="true"
                     android:layout_marginBottom="4dp">
 
@@ -1155,162 +1155,186 @@
                             android:typeface="monospace"
                             android:textSize="10.5sp"
                             android:lineSpacingExtra="2dp"
-                            android:textColor="#CDD6F4"
+                            android:textColor="#E2E8F0"
                             android:text="Connecting to terminal..." />
                     </HorizontalScrollView>
                 </ScrollView>
 
-                <!-- Quick Keys Toolbar -->
-                <HorizontalScrollView
+                <!-- Quick Keys Table Toolbar (2 Compact Rows - No Swiping) -->
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:scrollbars="none"
+                    android:orientation="vertical"
                     android:layout_marginBottom="4dp">
 
+                    <!-- Row 1: Modes & Navigation -->
                     <LinearLayout
-                        android:layout_width="wrap_content"
-                        android:layout_height="30dp"
+                        android:layout_width="match_parent"
+                        android:layout_height="28dp"
                         android:orientation="horizontal"
-                        android:gravity="center_vertical">
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="3dp">
 
                         <Button
                             android:id="@+id/btn_key_mode"
-                            android:layout_width="wrap_content"
-                            android:layout_height="26dp"
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_weight="1.2"
                             android:text="⚡ Auto: ON"
-                            android:textSize="10sp"
+                            android:textSize="9.5sp"
                             android:textStyle="bold"
                             android:textColor="@color/accent_cyan"
                             android:background="@drawable/card_bg"
-                            android:paddingStart="8dp"
-                            android:paddingEnd="8dp"
-                            android:layout_marginEnd="4dp" />
+                            android:paddingStart="4dp"
+                            android:paddingEnd="4dp"
+                            android:layout_marginEnd="3dp" />
 
                         <Button
                             android:id="@+id/btn_key_wrap"
-                            android:layout_width="wrap_content"
-                            android:layout_height="26dp"
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_weight="1.1"
                             android:text="🔄 Wrap: ON"
-                            android:textSize="10sp"
+                            android:textSize="9.5sp"
                             android:textStyle="bold"
                             android:textColor="@color/accent_cyan"
                             android:background="@drawable/card_bg"
-                            android:paddingStart="8dp"
-                            android:paddingEnd="8dp"
-                            android:layout_marginEnd="4dp" />
+                            android:paddingStart="4dp"
+                            android:paddingEnd="4dp"
+                            android:layout_marginEnd="3dp" />
 
                         <Button
                             android:id="@+id/btn_key_tab"
-                            android:layout_width="wrap_content"
-                            android:layout_height="26dp"
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_weight="0.8"
                             android:text="Tab"
                             android:textSize="10sp"
                             android:textStyle="bold"
                             android:textColor="@color/accent_cyan"
                             android:background="@drawable/card_bg"
-                            android:paddingStart="8dp"
-                            android:paddingEnd="8dp"
-                            android:layout_marginEnd="4dp" />
+                            android:paddingStart="2dp"
+                            android:paddingEnd="2dp"
+                            android:layout_marginEnd="3dp" />
 
                         <Button
                             android:id="@+id/btn_key_up"
-                            android:layout_width="32dp"
-                            android:layout_height="26dp"
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_weight="0.7"
                             android:text="↑"
-                            android:textSize="11sp"
+                            android:textSize="12sp"
                             android:textStyle="bold"
                             android:textColor="@color/accent_cyan"
                             android:background="@drawable/card_bg"
-                            android:layout_marginEnd="4dp" />
+                            android:paddingStart="2dp"
+                            android:paddingEnd="2dp"
+                            android:layout_marginEnd="3dp" />
 
                         <Button
                             android:id="@+id/btn_key_down"
-                            android:layout_width="32dp"
-                            android:layout_height="26dp"
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_weight="0.7"
                             android:text="↓"
-                            android:textSize="11sp"
+                            android:textSize="12sp"
                             android:textStyle="bold"
                             android:textColor="@color/accent_cyan"
                             android:background="@drawable/card_bg"
-                            android:layout_marginEnd="4dp" />
-
-                        <Button
-                            android:id="@+id/btn_key_enter"
-                            android:layout_width="wrap_content"
-                            android:layout_height="26dp"
-                            android:text="↵ Enter"
-                            android:textSize="10sp"
-                            android:textStyle="bold"
-                            android:textColor="@color/accent_cyan"
-                            android:background="@drawable/card_bg"
-                            android:paddingStart="8dp"
-                            android:paddingEnd="8dp"
-                            android:layout_marginEnd="4dp" />
+                            android:paddingStart="2dp"
+                            android:paddingEnd="2dp"
+                            android:layout_marginEnd="3dp" />
 
                         <Button
                             android:id="@+id/btn_key_esc"
-                            android:layout_width="wrap_content"
-                            android:layout_height="26dp"
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_weight="0.8"
                             android:text="Esc"
                             android:textSize="10sp"
                             android:textStyle="bold"
                             android:textColor="@color/text_white"
                             android:background="@drawable/card_bg"
-                            android:paddingStart="8dp"
-                            android:paddingEnd="8dp"
-                            android:layout_marginEnd="4dp" />
+                            android:paddingStart="2dp"
+                            android:paddingEnd="2dp" />
+                    </LinearLayout>
+
+                    <!-- Row 2: Control & Action Keys -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="28dp"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <Button
+                            android:id="@+id/btn_key_enter"
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_weight="1.1"
+                            android:text="↵ Enter"
+                            android:textSize="10sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/accent_cyan"
+                            android:background="@drawable/card_bg"
+                            android:paddingStart="4dp"
+                            android:paddingEnd="4dp"
+                            android:layout_marginEnd="3dp" />
 
                         <Button
                             android:id="@+id/btn_key_ctrl_c"
-                            android:layout_width="wrap_content"
-                            android:layout_height="26dp"
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_weight="1.0"
                             android:text="Ctrl+C"
                             android:textSize="10sp"
                             android:textStyle="bold"
                             android:textColor="@color/status_red"
                             android:background="@drawable/card_bg"
-                            android:paddingStart="8dp"
-                            android:paddingEnd="8dp"
-                            android:layout_marginEnd="4dp" />
+                            android:paddingStart="2dp"
+                            android:paddingEnd="2dp"
+                            android:layout_marginEnd="3dp" />
 
                         <Button
                             android:id="@+id/btn_key_ctrl_d"
-                            android:layout_width="wrap_content"
-                            android:layout_height="26dp"
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_weight="0.9"
                             android:text="Ctrl+D"
                             android:textSize="10sp"
                             android:textStyle="bold"
                             android:textColor="@color/text_white"
                             android:background="@drawable/card_bg"
-                            android:paddingStart="8dp"
-                            android:paddingEnd="8dp"
-                            android:layout_marginEnd="4dp" />
+                            android:paddingStart="2dp"
+                            android:paddingEnd="2dp"
+                            android:layout_marginEnd="3dp" />
 
                         <Button
                             android:id="@+id/btn_key_copy"
-                            android:layout_width="wrap_content"
-                            android:layout_height="26dp"
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_weight="1.0"
                             android:text="📋 Copy"
                             android:textSize="10sp"
                             android:textStyle="bold"
                             android:textColor="@color/accent_cyan"
                             android:background="@drawable/card_bg"
-                            android:paddingStart="8dp"
-                            android:paddingEnd="8dp"
-                            android:layout_marginEnd="4dp" />
+                            android:paddingStart="2dp"
+                            android:paddingEnd="2dp"
+                            android:layout_marginEnd="3dp" />
 
                         <Button
                             android:id="@+id/btn_key_clear"
-                            android:layout_width="wrap_content"
-                            android:layout_height="26dp"
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_weight="0.8"
                             android:text="Clear"
                             android:textSize="10sp"
                             android:textColor="@color/text_muted"
                             android:background="@drawable/card_bg"
-                            android:paddingStart="8dp"
-                            android:paddingEnd="8dp" />
+                            android:paddingStart="2dp"
+                            android:paddingEnd="2dp" />
                     </LinearLayout>
-                </HorizontalScrollView>
+                </LinearLayout>
 
                 <!-- Input & Send Bar -->
                 <LinearLayout
