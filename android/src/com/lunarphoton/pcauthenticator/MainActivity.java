@@ -151,7 +151,6 @@ public class MainActivity extends Activity {
     private TextView tabBtnDashboard;
     private TextView tabBtnTerminals;
     private Button btnOpenTerminalsAction;
-    private GestureDetector swipeGestureDetector;
 
     private View layoutTopTabs;
     private View panelTerminals;
@@ -3390,14 +3389,6 @@ public class MainActivity extends Activity {
     }
 
     // --- Live Terminals Panel Implementation ---
-    @Override
-    public boolean dispatchTouchEvent(MotionEvent ev) {
-        if (swipeGestureDetector != null) {
-            swipeGestureDetector.onTouchEvent(ev);
-        }
-        return super.dispatchTouchEvent(ev);
-    }
-
     private void initTerminalsPanel() {
         mainViewFlipper = findViewById(R.id.main_view_flipper);
         tabBtnDashboard = findViewById(R.id.tab_btn_dashboard);
@@ -3413,35 +3404,6 @@ public class MainActivity extends Activity {
         if (btnOpenTerminalsAction != null) {
             btnOpenTerminalsAction.setOnClickListener(v -> switchToPanel(1));
         }
-
-        // Swipe detector: swipe left to open Terminals, swipe right to return to Dashboard
-        swipeGestureDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
-            private static final int SWIPE_MIN_DISTANCE = 90;
-            private static final int SWIPE_THRESHOLD_VELOCITY = 150;
-
-            @Override
-            public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
-                if (e1 == null || e2 == null) return false;
-                float diffX = e2.getX() - e1.getX();
-                float diffY = e2.getY() - e1.getY();
-                if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > SWIPE_MIN_DISTANCE && Math.abs(velocityX) > SWIPE_THRESHOLD_VELOCITY) {
-                    if (diffX < 0) {
-                        // Swipe Left: Dashboard -> Terminals
-                        if (mainViewFlipper != null && mainViewFlipper.getDisplayedChild() == 0) {
-                            switchToPanel(1);
-                            return true;
-                        }
-                    } else if (diffX > 0) {
-                        // Swipe Right: Terminals -> Dashboard
-                        if (mainViewFlipper != null && mainViewFlipper.getDisplayedChild() == 1) {
-                            switchToPanel(0);
-                            return true;
-                        }
-                    }
-                }
-                return false;
-            }
-        });
 
         // Terminals Panel Views
         layoutTopTabs = findViewById(R.id.layout_top_tabs);

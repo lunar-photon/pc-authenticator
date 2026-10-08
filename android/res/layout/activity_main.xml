@@ -5,7 +5,7 @@
     android:orientation="vertical"
     android:background="@color/bg_dark">
 
-    <!-- Top Mode Navigation Bar (Swipe or Tap) -->
+    <!-- Top Mode Navigation Bar (Tap to switch) -->
     <LinearLayout
         android:id="@+id/layout_top_tabs"
         android:layout_width="match_parent"
