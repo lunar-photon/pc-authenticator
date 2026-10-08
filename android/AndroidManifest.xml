@@ -60,7 +60,7 @@
             android:showWhenLocked="true"
             android:turnScreenOn="true"
             android:showOnLockScreen="true"
-            android:screenOrientation="portrait">
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

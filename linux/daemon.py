@@ -956,6 +956,19 @@ def get_open_terminals():
 
     return terminals
 
+TERMINAL_HISTORY_BUFFERS = {}
+
+def merge_terminal_lines(existing_lines, new_lines):
+    if not existing_lines:
+        return list(new_lines)
+    if not new_lines:
+        return list(existing_lines)
+    max_overlap = min(len(existing_lines), len(new_lines))
+    for k in range(max_overlap, 0, -1):
+        if existing_lines[-k:] == new_lines[:k]:
+            return existing_lines + new_lines[k:]
+    return existing_lines + new_lines
+
 def read_terminal(term_id, max_lines=35):
     if ':' in term_id and 'org.kde.konsole' in term_id:
         svc, sid = term_id.split(':', 1)
@@ -963,12 +976,19 @@ def read_terminal(term_id, max_lines=35):
         t_res = subprocess.run(['qdbus6', svc, spath, 'org.kde.konsole.Session.title', '1'], capture_output=True, text=True, timeout=1)
         title = t_res.stdout.strip()
         txt_res = subprocess.run(['qdbus6', svc, spath, 'org.kde.konsole.Session.getAllDisplayedText'], capture_output=True, text=True, timeout=2)
-        all_lines = txt_res.stdout.splitlines()
-        total_count = len(all_lines)
-        if len(all_lines) > max_lines:
-            lines = all_lines[-max_lines:]
+        displayed_lines = txt_res.stdout.splitlines()
+
+        prev_buf = TERMINAL_HISTORY_BUFFERS.get(term_id, [])
+        updated_buf = merge_terminal_lines(prev_buf, displayed_lines)
+        if len(updated_buf) > 3000:
+            updated_buf = updated_buf[-3000:]
+        TERMINAL_HISTORY_BUFFERS[term_id] = updated_buf
+
+        total_count = len(updated_buf)
+        if total_count > max_lines:
+            lines = updated_buf[-max_lines:]
         else:
-            lines = all_lines
+            lines = updated_buf
         return {
             'status': 'ok',
             'id': term_id,

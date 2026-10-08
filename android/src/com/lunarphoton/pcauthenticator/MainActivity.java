@@ -9,7 +9,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.hardware.biometrics.BiometricManager;
 import android.hardware.biometrics.BiometricPrompt;
@@ -162,6 +164,7 @@ public class MainActivity extends Activity {
     private TextView tvInteractiveTitle;
     private TextView tvInteractiveStatus;
     private Button btnInteractiveRefresh;
+    private Button btnInteractiveRotate;
     private TextView tvInteractiveCwd;
     private ScrollView scrollTermScreen;
     private TextView tvTermScreen;
@@ -3447,6 +3450,7 @@ public class MainActivity extends Activity {
         tvInteractiveTitle = findViewById(R.id.tv_interactive_title);
         tvInteractiveStatus = findViewById(R.id.tv_interactive_status);
         btnInteractiveRefresh = findViewById(R.id.btn_interactive_refresh);
+        btnInteractiveRotate = findViewById(R.id.btn_interactive_rotate);
         tvInteractiveCwd = findViewById(R.id.tv_interactive_cwd);
         scrollTermScreen = findViewById(R.id.scroll_term_screen);
         tvTermScreen = findViewById(R.id.tv_term_screen);
@@ -3479,6 +3483,9 @@ public class MainActivity extends Activity {
         }
         if (btnInteractiveRefresh != null) {
             btnInteractiveRefresh.setOnClickListener(v -> pollActiveTerminalOutput());
+        }
+        if (btnInteractiveRotate != null) {
+            btnInteractiveRotate.setOnClickListener(v -> toggleTerminalOrientation());
         }
 
         if (btnKeyCtrlC != null) btnKeyCtrlC.setOnClickListener(v -> sendTerminalKey("ctrl_c"));
@@ -3668,7 +3675,10 @@ public class MainActivity extends Activity {
         preserveDistanceFromBottom = -1;
         isFirstTerminalLoad = true;
 
-        if (btnTermLoadEarlier != null) btnTermLoadEarlier.setVisibility(View.GONE);
+        if (btnTermLoadEarlier != null) {
+            btnTermLoadEarlier.setVisibility(View.GONE);
+            btnTermLoadEarlier.setEnabled(true);
+        }
         if (scrollTermList != null) scrollTermList.setVisibility(View.GONE);
         if (layoutTerminalInteractive != null) layoutTerminalInteractive.setVisibility(View.VISIBLE);
 
@@ -3692,9 +3702,35 @@ public class MainActivity extends Activity {
         } else {
             preserveDistanceFromBottom = -1;
         }
-        currentTerminalLinesToFetch += 40;
-        if (btnTermLoadEarlier != null) btnTermLoadEarlier.setText("⏳ Loading earlier history...");
+        currentTerminalLinesToFetch += 50;
+        if (btnTermLoadEarlier != null) {
+            btnTermLoadEarlier.setText("⏳ Loading earlier history...");
+            btnTermLoadEarlier.setEnabled(false);
+        }
         pollActiveTerminalOutput();
+    }
+
+    private void toggleTerminalOrientation() {
+        int currentOrientation = getResources().getConfiguration().orientation;
+        if (currentOrientation == Configuration.ORIENTATION_PORTRAIT) {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+            if (btnInteractiveRotate != null) btnInteractiveRotate.setText("📱");
+        } else {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+            if (btnInteractiveRotate != null) btnInteractiveRotate.setText("🔄");
+        }
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        if (btnInteractiveRotate != null) {
+            if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+                btnInteractiveRotate.setText("📱");
+            } else {
+                btnInteractiveRotate.setText("🔄");
+            }
+        }
     }
 
     private void closeTerminalInteractive() {
@@ -3703,6 +3739,8 @@ public class MainActivity extends Activity {
         lastLoadedTerminalText = "";
         preserveDistanceFromBottom = -1;
         isFirstTerminalLoad = true;
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+        if (btnInteractiveRotate != null) btnInteractiveRotate.setText("🔄");
         if (layoutTerminalInteractive != null) layoutTerminalInteractive.setVisibility(View.GONE);
         if (scrollTermList != null) scrollTermList.setVisibility(View.VISIBLE);
         loadTerminalsList();
@@ -3753,11 +3791,15 @@ public class MainActivity extends Activity {
                             isLoadingEarlier = false;
 
                             if (btnTermLoadEarlier != null) {
+                                btnTermLoadEarlier.setVisibility(View.VISIBLE);
                                 if (hasMore && remaining > 0) {
-                                    btnTermLoadEarlier.setVisibility(View.VISIBLE);
+                                    btnTermLoadEarlier.setEnabled(true);
                                     btnTermLoadEarlier.setText("⬆ Load earlier output (" + remaining + " lines above)");
+                                    btnTermLoadEarlier.setTextColor(getColor(R.color.accent_cyan));
                                 } else {
-                                    btnTermLoadEarlier.setVisibility(View.GONE);
+                                    btnTermLoadEarlier.setEnabled(false);
+                                    btnTermLoadEarlier.setText("── Top of terminal history (" + total + " lines) ──");
+                                    btnTermLoadEarlier.setTextColor(getColor(R.color.text_muted));
                                 }
                             }
 

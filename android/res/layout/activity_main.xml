@@ -1092,11 +1092,21 @@
                         android:layout_marginEnd="6dp" />
 
                     <Button
-                        android:id="@+id/btn_interactive_refresh"
+                        android:id="@+id/btn_interactive_rotate"
                         android:layout_width="32dp"
                         android:layout_height="32dp"
                         android:text="🔄"
                         android:textSize="12sp"
+                        android:textColor="@color/text_white"
+                        android:background="@drawable/card_bg"
+                        android:layout_marginEnd="6dp" />
+
+                    <Button
+                        android:id="@+id/btn_interactive_refresh"
+                        android:layout_width="32dp"
+                        android:layout_height="32dp"
+                        android:text="⟳"
+                        android:textSize="14sp"
                         android:textColor="@color/text_white"
                         android:background="@drawable/card_bg" />
                 </LinearLayout>
@@ -1137,15 +1147,23 @@
                     android:descendantFocusability="blocksDescendants"
                     android:layout_marginBottom="6dp">
 
-                    <TextView
-                        android:id="@+id/tv_term_screen"
+                    <HorizontalScrollView
+                        android:id="@+id/hscroll_term_screen"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:padding="10dp"
-                        android:typeface="monospace"
-                        android:textSize="11sp"
-                        android:textColor="#39FF14"
-                        android:text="Connecting to terminal..." />
+                        android:fillViewport="true">
+
+                        <TextView
+                            android:id="@+id/tv_term_screen"
+                            android:layout_width="wrap_content"
+                            android:minWidth="340dp"
+                            android:layout_height="wrap_content"
+                            android:padding="10dp"
+                            android:typeface="monospace"
+                            android:textSize="11sp"
+                            android:textColor="#39FF14"
+                            android:text="Connecting to terminal..." />
+                    </HorizontalScrollView>
                 </ScrollView>
 
                 <!-- Quick Keys Toolbar -->
