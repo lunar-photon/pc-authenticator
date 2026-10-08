@@ -447,18 +447,6 @@
                     android:background="@drawable/card_bg"
                     android:layout_marginStart="4dp" />
             </LinearLayout>
-
-            <!-- Terminal Quick Action -->
-            <Button
-                android:id="@+id/btn_open_terminals_action"
-                android:layout_width="match_parent"
-                android:layout_height="42dp"
-                android:text="💻 Live Terminals (Swipe ➔)"
-                android:textSize="13sp"
-                android:textStyle="bold"
-                android:textColor="@color/accent_cyan"
-                android:background="@drawable/card_bg"
-                android:layout_marginTop="6dp" />
         </LinearLayout>
 
         <!-- Quick Actions & Tools Card -->

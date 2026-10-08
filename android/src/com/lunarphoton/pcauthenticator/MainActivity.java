@@ -150,7 +150,6 @@ public class MainActivity extends Activity {
     private ViewFlipper mainViewFlipper;
     private TextView tabBtnDashboard;
     private TextView tabBtnTerminals;
-    private Button btnOpenTerminalsAction;
 
     private View layoutTopTabs;
     private View panelTerminals;
@@ -3393,16 +3392,12 @@ public class MainActivity extends Activity {
         mainViewFlipper = findViewById(R.id.main_view_flipper);
         tabBtnDashboard = findViewById(R.id.tab_btn_dashboard);
         tabBtnTerminals = findViewById(R.id.tab_btn_terminals);
-        btnOpenTerminalsAction = findViewById(R.id.btn_open_terminals_action);
 
         if (tabBtnDashboard != null) {
             tabBtnDashboard.setOnClickListener(v -> switchToPanel(0));
         }
         if (tabBtnTerminals != null) {
             tabBtnTerminals.setOnClickListener(v -> switchToPanel(1));
-        }
-        if (btnOpenTerminalsAction != null) {
-            btnOpenTerminalsAction.setOnClickListener(v -> switchToPanel(1));
         }
 
         // Terminals Panel Views
