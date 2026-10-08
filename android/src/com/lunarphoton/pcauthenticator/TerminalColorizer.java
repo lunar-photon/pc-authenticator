@@ -293,7 +293,7 @@ public class TerminalColorizer {
                 ssb.setSpan(new StyleSpan(Typeface.BOLD), s + relCircle, s + relCircle + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
             ssb.setSpan(new ForegroundColorSpan(COLOR_DEFAULT), s + relCircle + 1, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-            highlightPathsAndMetrics(ssb, line, s, e);
+            highlightPathsAndMetrics(ssb, line, s, relCircle + 1, line.length());
             return;
         }
 
@@ -331,7 +331,7 @@ public class TerminalColorizer {
                 ssb.setSpan(new ForegroundColorSpan(COLOR_PURPLE), s + relIcon, s + relIcon + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
             ssb.setSpan(new ForegroundColorSpan(COLOR_VIOLET), s, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-            highlightPathsAndMetrics(ssb, line, s, e);
+            highlightPathsAndMetrics(ssb, line, s, 0, line.length());
             return;
         }
 
@@ -416,7 +416,7 @@ public class TerminalColorizer {
             ssb.setSpan(new StyleSpan(Typeface.BOLD), s + relLabel, s + relRest, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
             // Rest of text in Crisp Off-White
             ssb.setSpan(new ForegroundColorSpan(COLOR_DEFAULT), s + relRest, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-            highlightPathsAndMetrics(ssb, line, s + relRest, e);
+            highlightPathsAndMetrics(ssb, line, s, relRest, line.length());
             return;
         }
 
@@ -436,7 +436,7 @@ public class TerminalColorizer {
             ssb.setSpan(new StyleSpan(Typeface.BOLD), s + relLabel, s + relRest, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
             // Rest in Crisp Off-White
             ssb.setSpan(new ForegroundColorSpan(COLOR_DEFAULT), s + relRest, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-            highlightPathsAndMetrics(ssb, line, s + relRest, e);
+            highlightPathsAndMetrics(ssb, line, s, relRest, line.length());
             return;
         }
 
@@ -475,38 +475,42 @@ public class TerminalColorizer {
 
         // 20. Default regular text (idle / assistant response text)
         ssb.setSpan(new ForegroundColorSpan(COLOR_DEFAULT), s, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-        highlightPathsAndMetrics(ssb, line, s, e);
+        highlightPathsAndMetrics(ssb, line, s, 0, line.length());
     }
 
-    private static void highlightPathsAndMetrics(SpannableStringBuilder ssb, String line, int s, int e) {
+    private static void highlightPathsAndMetrics(SpannableStringBuilder ssb, String line, int lineStartInSsb, int minCol, int maxCol) {
         // Track ranges of paths to prevent number regex from overwriting path segments
         List<int[]> pathRanges = new ArrayList<>();
 
         // Highlight file paths, code tokens, and URLs in Electric Cyan
         Matcher pathM = PATH_OR_CODE_PATTERN.matcher(line);
         while (pathM.find()) {
-            int pStart = s + pathM.start();
-            int pEnd = s + pathM.end();
-            if (pStart >= s && pEnd <= e) {
+            int colStart = pathM.start();
+            int colEnd = pathM.end();
+            if (colStart >= minCol && colEnd <= maxCol) {
+                int pStart = lineStartInSsb + colStart;
+                int pEnd = lineStartInSsb + colEnd;
                 ssb.setSpan(new ForegroundColorSpan(COLOR_CYAN), pStart, pEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-                pathRanges.add(new int[]{pStart, pEnd});
+                pathRanges.add(new int[]{colStart, colEnd});
             }
         }
 
         // Highlight durations, numbers, token metrics in Vibrant Amber/Gold
         Matcher numM = NUMBER_METRIC_PATTERN.matcher(line);
         while (numM.find()) {
-            int nStart = s + numM.start();
-            int nEnd = s + numM.end();
-            if (nStart >= s && nEnd <= e) {
+            int colStart = numM.start();
+            int colEnd = numM.end();
+            if (colStart >= minCol && colEnd <= maxCol) {
                 boolean overlaps = false;
                 for (int[] range : pathRanges) {
-                    if (nStart < range[1] && nEnd > range[0]) {
+                    if (colStart < range[1] && colEnd > range[0]) {
                         overlaps = true;
                         break;
                     }
                 }
                 if (!overlaps) {
+                    int nStart = lineStartInSsb + colStart;
+                    int nEnd = lineStartInSsb + colEnd;
                     ssb.setSpan(new ForegroundColorSpan(COLOR_YELLOW), nStart, nEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
                 }
             }
@@ -515,9 +519,11 @@ public class TerminalColorizer {
         // Highlight markdown bold **bold text** in Pure White Bold
         Matcher boldM = BOLD_PATTERN.matcher(line);
         while (boldM.find()) {
-            int bStart = s + boldM.start(1);
-            int bEnd = s + boldM.end(1);
-            if (bStart >= s && bEnd <= e) {
+            int colStart = boldM.start(1);
+            int colEnd = boldM.end(1);
+            if (colStart >= minCol && colEnd <= maxCol) {
+                int bStart = lineStartInSsb + colStart;
+                int bEnd = lineStartInSsb + colEnd;
                 ssb.setSpan(new ForegroundColorSpan(COLOR_WHITE), bStart, bEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
                 ssb.setSpan(new StyleSpan(Typeface.BOLD), bStart, bEnd, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
