@@ -180,15 +180,13 @@ public class MainActivity extends Activity {
     private Button btnTermLoadEarlier;
 
     private Button btnKeyMode;
-    private Button btnKeyCtrlC;
+    private Button btnKeyCtrl;
+    private Button btnKeyEsc;
     private Button btnKeyTab;
     private Button btnKeyUp;
     private Button btnKeyDown;
-    private Button btnKeyEnter;
-    private Button btnKeyEsc;
-    private Button btnKeyCtrlD;
     private Button btnKeyClear;
-    private Button btnKeyCopy;
+    private boolean isCtrlActive = false;
 
     private EditText etTermInput;
     private Button btnTermSend;
@@ -3455,103 +3453,8 @@ public class MainActivity extends Activity {
         tvTermScreen = findViewById(R.id.tv_term_screen);
         btnTermLoadEarlier = findViewById(R.id.btn_term_load_earlier);
 
-        // Deliberate hold-to-copy handler: requires pressing and holding still for 750ms
-        final Handler termHoldHandler = new Handler(Looper.getMainLooper());
-        final Runnable termHoldRunnable = () -> {
-            if (tvTermScreen != null) {
-                try {
-                    tvTermScreen.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-                } catch (Exception ignored) {}
-            }
-            copyTerminalTextToClipboard();
-        };
-        final int HOLD_COPY_DELAY_MS = 750;
-
-        // Enable responsive 2D scrolling: ensure vertical scrolls are never blocked by horizontal scrolling
-        View.OnTouchListener termTouchListener = new View.OnTouchListener() {
-            private float startX = 0f;
-            private float startY = 0f;
-            private boolean isDraggingHorizontal = false;
-            private boolean isDraggingVertical = false;
-            private boolean isHoldScheduled = false;
-
-            @Override
-            public boolean onTouch(View v, MotionEvent event) {
-                switch (event.getActionMasked()) {
-                    case MotionEvent.ACTION_DOWN:
-                        startX = event.getX();
-                        startY = event.getY();
-                        isDraggingHorizontal = false;
-                        isDraggingVertical = false;
-                        if (scrollTermScreen != null) {
-                            scrollTermScreen.requestDisallowInterceptTouchEvent(false);
-                        }
-                        // Schedule hold-to-copy only if user holds finger still without moving
-                        termHoldHandler.removeCallbacks(termHoldRunnable);
-                        termHoldHandler.postDelayed(termHoldRunnable, HOLD_COPY_DELAY_MS);
-                        isHoldScheduled = true;
-                        break;
-
-                    case MotionEvent.ACTION_MOVE:
-                        float dx = Math.abs(event.getX() - startX);
-                        float dy = Math.abs(event.getY() - startY);
-
-                        // If user moved more than a slight touch (10px), cancel hold immediately
-                        if (dx > 10 || dy > 10) {
-                            if (isHoldScheduled) {
-                                termHoldHandler.removeCallbacks(termHoldRunnable);
-                                isHoldScheduled = false;
-                            }
-                        }
-
-                        if (isTerminalWrapEnabled) {
-                            isDraggingHorizontal = false;
-                            isDraggingVertical = true;
-                            if (scrollTermScreen != null) {
-                                scrollTermScreen.requestDisallowInterceptTouchEvent(false);
-                            }
-                        } else if (!isDraggingHorizontal && !isDraggingVertical) {
-                            if (dy > 10 && dy > dx) {
-                                isDraggingVertical = true;
-                                if (scrollTermScreen != null) {
-                                    scrollTermScreen.requestDisallowInterceptTouchEvent(false);
-                                }
-                            } else if (dx > 10 && dx > dy) {
-                                isDraggingHorizontal = true;
-                                if (scrollTermScreen != null) {
-                                    scrollTermScreen.requestDisallowInterceptTouchEvent(true);
-                                }
-                            }
-                        } else if (isDraggingVertical) {
-                            if (scrollTermScreen != null) {
-                                scrollTermScreen.requestDisallowInterceptTouchEvent(false);
-                            }
-                        }
-                        break;
-
-                    case MotionEvent.ACTION_UP:
-                    case MotionEvent.ACTION_CANCEL:
-                        // Touch ended or cancelled: cancel hold immediately
-                        if (isHoldScheduled) {
-                            termHoldHandler.removeCallbacks(termHoldRunnable);
-                            isHoldScheduled = false;
-                        }
-                        isDraggingHorizontal = false;
-                        isDraggingVertical = false;
-                        if (scrollTermScreen != null) {
-                            scrollTermScreen.requestDisallowInterceptTouchEvent(false);
-                        }
-                        break;
-                }
-                return false;
-            }
-        };
-
-        if (hscrollTermScreen != null) {
-            hscrollTermScreen.setOnTouchListener(termTouchListener);
-        }
         if (tvTermScreen != null) {
-            tvTermScreen.setOnTouchListener(termTouchListener);
+            tvTermScreen.setTextIsSelectable(true);
         }
 
         if (btnTermLoadEarlier != null) {
@@ -3559,14 +3462,11 @@ public class MainActivity extends Activity {
         }
 
         btnKeyMode = findViewById(R.id.btn_key_mode);
-        btnKeyCtrlC = findViewById(R.id.btn_key_ctrl_c);
+        btnKeyCtrl = findViewById(R.id.btn_key_ctrl);
+        btnKeyEsc = findViewById(R.id.btn_key_esc);
         btnKeyTab = findViewById(R.id.btn_key_tab);
         btnKeyUp = findViewById(R.id.btn_key_up);
         btnKeyDown = findViewById(R.id.btn_key_down);
-        btnKeyEnter = findViewById(R.id.btn_key_enter);
-        btnKeyEsc = findViewById(R.id.btn_key_esc);
-        btnKeyCtrlD = findViewById(R.id.btn_key_ctrl_d);
-        btnKeyCopy = findViewById(R.id.btn_key_copy);
         btnKeyClear = findViewById(R.id.btn_key_clear);
 
         etTermInput = findViewById(R.id.et_term_input);
@@ -3603,24 +3503,16 @@ public class MainActivity extends Activity {
                 vibrate(15);
             });
         }
+        if (btnKeyCtrl != null) {
+            btnKeyCtrl.setOnClickListener(v -> {
+                isCtrlActive = !isCtrlActive;
+                updateCtrlButtonUI();
+                vibrate(15);
+            });
+        }
         if (btnKeyEsc != null) {
             btnKeyEsc.setOnClickListener(v -> {
                 sendTerminalKey("escape");
-                vibrate(15);
-            });
-        }
-        if (btnKeyCtrlC != null) {
-            btnKeyCtrlC.setOnClickListener(v -> {
-                sendTerminalKey("ctrl_c");
-                isInternalTextUpdate = true;
-                if (etTermInput != null) etTermInput.setText("");
-                isInternalTextUpdate = false;
-                vibrate(15);
-            });
-        }
-        if (btnKeyCtrlD != null) {
-            btnKeyCtrlD.setOnClickListener(v -> {
-                sendTerminalKey("ctrl_d");
                 vibrate(15);
             });
         }
@@ -3651,21 +3543,9 @@ public class MainActivity extends Activity {
                 vibrate(15);
             });
         }
-        if (btnKeyEnter != null) {
-            btnKeyEnter.setOnClickListener(v -> {
-                handleSendTerminalInput();
-                vibrate(15);
-            });
-        }
         if (btnKeyClear != null) {
             btnKeyClear.setOnClickListener(v -> {
                 if (tvTermScreen != null) tvTermScreen.setText("");
-                vibrate(15);
-            });
-        }
-        if (btnKeyCopy != null) {
-            btnKeyCopy.setOnClickListener(v -> {
-                copyTerminalTextToClipboard();
                 vibrate(15);
             });
         }
@@ -3680,7 +3560,27 @@ public class MainActivity extends Activity {
 
                 @Override
                 public void onTextChanged(CharSequence s, int start, int before, int count) {
-                    if (isInternalTextUpdate || !isLiveTypeEnabled || activeTerminalId == null) {
+                    if (isInternalTextUpdate || activeTerminalId == null) {
+                        return;
+                    }
+                    if (isCtrlActive && count > 0) {
+                        String added = s.subSequence(start, start + count).toString();
+                        if (!added.isEmpty()) {
+                            char ch = added.charAt(0);
+                            if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')) {
+                                char letter = Character.toLowerCase(ch);
+                                sendTerminalKey("ctrl_" + letter);
+                                isCtrlActive = false;
+                                updateCtrlButtonUI();
+                                isInternalTextUpdate = true;
+                                etTermInput.setText("");
+                                isInternalTextUpdate = false;
+                                vibrate(15);
+                                return;
+                            }
+                        }
+                    }
+                    if (!isLiveTypeEnabled) {
                         return;
                     }
                     if (before > 0) {
@@ -3713,6 +3613,7 @@ public class MainActivity extends Activity {
             });
         }
         updateLiveModeUI();
+        updateCtrlButtonUI();
     }
 
     private void switchToPanel(int panelIndex) {
@@ -3994,6 +3895,8 @@ public class MainActivity extends Activity {
         if (scrollTermChips != null) scrollTermChips.setVisibility(View.VISIBLE);
         if (scrollTermList != null) scrollTermList.setVisibility(View.VISIBLE);
         if (layoutTopTabs != null) layoutTopTabs.setVisibility(View.VISIBLE);
+        isCtrlActive = false;
+        updateCtrlButtonUI();
         applyOrientationLayout(getResources().getConfiguration().orientation);
         loadTerminalsList();
     }
@@ -4010,6 +3913,20 @@ public class MainActivity extends Activity {
         }
         if (etTermInput != null) {
             etTermInput.setHint(isLiveTypeEnabled ? "Live typing (shows autocomplete)..." : "Type command, then tap Send...");
+        }
+    }
+
+    private void updateCtrlButtonUI() {
+        if (btnKeyCtrl != null) {
+            if (isCtrlActive) {
+                btnKeyCtrl.setText("Ctrl: ON");
+                btnKeyCtrl.setTextColor(getColor(R.color.status_yellow));
+                btnKeyCtrl.setBackgroundResource(R.drawable.badge_wifi);
+            } else {
+                btnKeyCtrl.setText("Ctrl");
+                btnKeyCtrl.setTextColor(getColor(R.color.accent_cyan));
+                btnKeyCtrl.setBackgroundResource(R.drawable.card_bg);
+            }
         }
     }
 

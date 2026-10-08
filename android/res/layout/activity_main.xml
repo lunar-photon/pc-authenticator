@@ -1156,170 +1156,114 @@
                             android:textSize="10.5sp"
                             android:lineSpacingExtra="2dp"
                             android:textColor="#E2E8F0"
+                            android:textIsSelectable="true"
                             android:text="Connecting to terminal..." />
                     </HorizontalScrollView>
                 </ScrollView>
 
-                <!-- Quick Keys Table Toolbar (2 Compact Rows - No Swiping) -->
+                <!-- Quick Keys Toolbar (Single Sleek Row - No Swiping) -->
                 <LinearLayout
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
+                    android:layout_height="30dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
                     android:layout_marginBottom="4dp">
 
-                    <!-- Row 1: Modes & Navigation -->
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="28dp"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:layout_marginBottom="3dp">
+                    <Button
+                        android:id="@+id/btn_key_mode"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1.35"
+                        android:text="⚡ Auto: ON"
+                        android:textSize="9.5sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/accent_cyan"
+                        android:background="@drawable/card_bg"
+                        android:paddingStart="4dp"
+                        android:paddingEnd="4dp"
+                        android:layout_marginEnd="3dp" />
 
-                        <Button
-                            android:id="@+id/btn_key_mode"
-                            android:layout_width="0dp"
-                            android:layout_height="match_parent"
-                            android:layout_weight="1.2"
-                            android:text="⚡ Auto: ON"
-                            android:textSize="9.5sp"
-                            android:textStyle="bold"
-                            android:textColor="@color/accent_cyan"
-                            android:background="@drawable/card_bg"
-                            android:paddingStart="4dp"
-                            android:paddingEnd="4dp"
-                            android:layout_marginEnd="3dp" />
+                    <Button
+                        android:id="@+id/btn_key_ctrl"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="0.95"
+                        android:text="Ctrl"
+                        android:textSize="10sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/accent_cyan"
+                        android:background="@drawable/card_bg"
+                        android:paddingStart="2dp"
+                        android:paddingEnd="2dp"
+                        android:layout_marginEnd="3dp" />
 
-                        <Button
-                            android:id="@+id/btn_key_tab"
-                            android:layout_width="0dp"
-                            android:layout_height="match_parent"
-                            android:layout_weight="0.9"
-                            android:text="Tab"
-                            android:textSize="10sp"
-                            android:textStyle="bold"
-                            android:textColor="@color/accent_cyan"
-                            android:background="@drawable/card_bg"
-                            android:paddingStart="2dp"
-                            android:paddingEnd="2dp"
-                            android:layout_marginEnd="3dp" />
+                    <Button
+                        android:id="@+id/btn_key_esc"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="0.85"
+                        android:text="Esc"
+                        android:textSize="10sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/text_white"
+                        android:background="@drawable/card_bg"
+                        android:paddingStart="2dp"
+                        android:paddingEnd="2dp"
+                        android:layout_marginEnd="3dp" />
 
-                        <Button
-                            android:id="@+id/btn_key_up"
-                            android:layout_width="0dp"
-                            android:layout_height="match_parent"
-                            android:layout_weight="0.8"
-                            android:text="↑"
-                            android:textSize="12sp"
-                            android:textStyle="bold"
-                            android:textColor="@color/accent_cyan"
-                            android:background="@drawable/card_bg"
-                            android:paddingStart="2dp"
-                            android:paddingEnd="2dp"
-                            android:layout_marginEnd="3dp" />
+                    <Button
+                        android:id="@+id/btn_key_tab"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="0.85"
+                        android:text="Tab"
+                        android:textSize="10sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/accent_cyan"
+                        android:background="@drawable/card_bg"
+                        android:paddingStart="2dp"
+                        android:paddingEnd="2dp"
+                        android:layout_marginEnd="3dp" />
 
-                        <Button
-                            android:id="@+id/btn_key_down"
-                            android:layout_width="0dp"
-                            android:layout_height="match_parent"
-                            android:layout_weight="0.8"
-                            android:text="↓"
-                            android:textSize="12sp"
-                            android:textStyle="bold"
-                            android:textColor="@color/accent_cyan"
-                            android:background="@drawable/card_bg"
-                            android:paddingStart="2dp"
-                            android:paddingEnd="2dp"
-                            android:layout_marginEnd="3dp" />
+                    <Button
+                        android:id="@+id/btn_key_up"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="0.75"
+                        android:text="↑"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/accent_cyan"
+                        android:background="@drawable/card_bg"
+                        android:paddingStart="2dp"
+                        android:paddingEnd="2dp"
+                        android:layout_marginEnd="3dp" />
 
-                        <Button
-                            android:id="@+id/btn_key_esc"
-                            android:layout_width="0dp"
-                            android:layout_height="match_parent"
-                            android:layout_weight="0.9"
-                            android:text="Esc"
-                            android:textSize="10sp"
-                            android:textStyle="bold"
-                            android:textColor="@color/text_white"
-                            android:background="@drawable/card_bg"
-                            android:paddingStart="2dp"
-                            android:paddingEnd="2dp" />
-                    </LinearLayout>
+                    <Button
+                        android:id="@+id/btn_key_down"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="0.75"
+                        android:text="↓"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/accent_cyan"
+                        android:background="@drawable/card_bg"
+                        android:paddingStart="2dp"
+                        android:paddingEnd="2dp"
+                        android:layout_marginEnd="3dp" />
 
-                    <!-- Row 2: Control & Action Keys -->
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="28dp"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical">
-
-                        <Button
-                            android:id="@+id/btn_key_enter"
-                            android:layout_width="0dp"
-                            android:layout_height="match_parent"
-                            android:layout_weight="1.1"
-                            android:text="↵ Enter"
-                            android:textSize="10sp"
-                            android:textStyle="bold"
-                            android:textColor="@color/accent_cyan"
-                            android:background="@drawable/card_bg"
-                            android:paddingStart="4dp"
-                            android:paddingEnd="4dp"
-                            android:layout_marginEnd="3dp" />
-
-                        <Button
-                            android:id="@+id/btn_key_ctrl_c"
-                            android:layout_width="0dp"
-                            android:layout_height="match_parent"
-                            android:layout_weight="1.0"
-                            android:text="Ctrl+C"
-                            android:textSize="10sp"
-                            android:textStyle="bold"
-                            android:textColor="@color/status_red"
-                            android:background="@drawable/card_bg"
-                            android:paddingStart="2dp"
-                            android:paddingEnd="2dp"
-                            android:layout_marginEnd="3dp" />
-
-                        <Button
-                            android:id="@+id/btn_key_ctrl_d"
-                            android:layout_width="0dp"
-                            android:layout_height="match_parent"
-                            android:layout_weight="0.9"
-                            android:text="Ctrl+D"
-                            android:textSize="10sp"
-                            android:textStyle="bold"
-                            android:textColor="@color/text_white"
-                            android:background="@drawable/card_bg"
-                            android:paddingStart="2dp"
-                            android:paddingEnd="2dp"
-                            android:layout_marginEnd="3dp" />
-
-                        <Button
-                            android:id="@+id/btn_key_copy"
-                            android:layout_width="0dp"
-                            android:layout_height="match_parent"
-                            android:layout_weight="1.0"
-                            android:text="📋 Copy"
-                            android:textSize="10sp"
-                            android:textStyle="bold"
-                            android:textColor="@color/accent_cyan"
-                            android:background="@drawable/card_bg"
-                            android:paddingStart="2dp"
-                            android:paddingEnd="2dp"
-                            android:layout_marginEnd="3dp" />
-
-                        <Button
-                            android:id="@+id/btn_key_clear"
-                            android:layout_width="0dp"
-                            android:layout_height="match_parent"
-                            android:layout_weight="0.8"
-                            android:text="Clear"
-                            android:textSize="10sp"
-                            android:textColor="@color/text_muted"
-                            android:background="@drawable/card_bg"
-                            android:paddingStart="2dp"
-                            android:paddingEnd="2dp" />
-                    </LinearLayout>
+                    <Button
+                        android:id="@+id/btn_key_clear"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="0.95"
+                        android:text="Clear"
+                        android:textSize="10sp"
+                        android:textColor="@color/text_muted"
+                        android:background="@drawable/card_bg"
+                        android:paddingStart="2dp"
+                        android:paddingEnd="2dp" />
                 </LinearLayout>
 
                 <!-- Input & Send Bar -->

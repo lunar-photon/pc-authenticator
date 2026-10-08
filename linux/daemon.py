@@ -1053,6 +1053,11 @@ def write_terminal(term_id, text):
     return {'status': 'error', 'message': 'Terminal not found or inaccessible'}
 
 def send_terminal_key(term_id, key_name):
+    k = key_name.lower().strip()
+    if k.startswith('ctrl_') and len(k) == 6:
+        letter = k[5]
+        if 'a' <= letter <= 'z':
+            return write_terminal(term_id, chr(ord(letter) - ord('a') + 1))
     KEY_MAP = {
         'ctrl_c': '\x03',
         'ctrl_d': '\x04',
@@ -1066,7 +1071,7 @@ def send_terminal_key(term_id, key_name):
         'escape': '\x1b',
         'backspace': '\x7f'
     }
-    char = KEY_MAP.get(key_name.lower())
+    char = KEY_MAP.get(k)
     if char:
         return write_terminal(term_id, char)
     return {'status': 'error', 'message': f'Unsupported key {key_name}'}

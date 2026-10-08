@@ -75,24 +75,29 @@ if [ -f "$SIGNED_APK" ]; then
     echo "✅ Custom APK built and signed successfully!"
     echo "Source APK: $SIGNED_APK"
     
-    # Deploy PCAuthenticator.apk to all distribution locations
+    # Deploy PCConnect.apk & PCAuthenticator.apk to all distribution locations
+    cp -f "$SIGNED_APK" "/home/lunarphoton/Downloads/PCConnect.apk"
     cp -f "$SIGNED_APK" "/home/lunarphoton/Downloads/PCAuthenticator.apk"
+    cp -f "$SIGNED_APK" "/home/lunarphoton/Downloads/All/pc-authenticator/android/PCConnect.apk" 2>/dev/null || true
     cp -f "$SIGNED_APK" "/home/lunarphoton/Downloads/All/pc-authenticator/android/PCAuthenticator.apk" 2>/dev/null || true
+    cp -f "$SIGNED_APK" "/home/lunarphoton/Downloads/All/pc-authenticator/linux/static/PCConnect.apk" 2>/dev/null || true
     cp -f "$SIGNED_APK" "/home/lunarphoton/Downloads/All/pc-authenticator/linux/static/PCAuthenticator.apk" 2>/dev/null || true
     if [ -d "/home/lunarphoton/.config/pc-authenticator/static" ]; then
+        cp -f "$SIGNED_APK" "/home/lunarphoton/.config/pc-authenticator/static/PCConnect.apk"
         cp -f "$SIGNED_APK" "/home/lunarphoton/.config/pc-authenticator/static/PCAuthenticator.apk"
     fi
-    rm -f "/home/lunarphoton/Downloads/authenticator.apk" "/home/lunarphoton/Downloads/PCConnect.apk"
+    rm -f "/home/lunarphoton/Downloads/authenticator.apk"
     
     echo "Deployed to:"
+    echo "📁 /home/lunarphoton/Downloads/PCConnect.apk"
     echo "📁 /home/lunarphoton/Downloads/PCAuthenticator.apk"
-    echo "📁 /home/lunarphoton/Downloads/All/pc-authenticator/android/PCAuthenticator.apk"
-    echo "📁 /home/lunarphoton/Downloads/All/pc-authenticator/linux/static/PCAuthenticator.apk"
+    echo "📁 /home/lunarphoton/Downloads/All/pc-authenticator/android/PCConnect.apk"
+    echo "📁 /home/lunarphoton/Downloads/All/pc-authenticator/linux/static/PCConnect.apk"
     if [ -d "/home/lunarphoton/.config/pc-authenticator/static" ]; then
-        echo "📁 /home/lunarphoton/.config/pc-authenticator/static/PCAuthenticator.apk"
+        echo "📁 /home/lunarphoton/.config/pc-authenticator/static/PCConnect.apk"
     fi
     echo "=================================================="
-    ls -lh "/home/lunarphoton/Downloads/PCAuthenticator.apk"
+    ls -lh "/home/lunarphoton/Downloads/PCConnect.apk"
 else
     echo "❌ Signing failed, output APK not found in $DIST_DIR"
     exit 1
