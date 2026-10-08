@@ -4059,6 +4059,11 @@ public class MainActivity extends Activity {
                                 }
                             }
 
+                            // If user is actively selecting text, do not overwrite screen and dismiss selection
+                            if (tvTermScreen != null && tvTermScreen.hasSelection()) {
+                                return;
+                            }
+
                             boolean textChanged = !text.equals(lastLoadedTerminalText);
                             if (!textChanged && preserveDistanceFromBottom < 0 && !isFirstTerminalLoad) {
                                 return;
@@ -4069,8 +4074,9 @@ public class MainActivity extends Activity {
                             final int savedPreserveDist = preserveDistanceFromBottom;
                             preserveDistanceFromBottom = -1;
 
-                            // Check whether user was at the bottom before text change
+                            // Check whether user was at the bottom before text change and save scroll position
                             final boolean wasAtBottom;
+                            final int savedScrollY = (scrollTermScreen != null) ? scrollTermScreen.getScrollY() : 0;
                             if (scrollTermScreen != null && tvTermScreen != null) {
                                 int scrollY = scrollTermScreen.getScrollY();
                                 int scrollHeight = scrollTermScreen.getHeight();
@@ -4089,7 +4095,7 @@ public class MainActivity extends Activity {
                                         if (layoutHandled[0]) return;
                                         layoutHandled[0] = true;
                                         tvTermScreen.removeOnLayoutChangeListener(this);
-                                        applyTerminalScroll(bottom - top, firstLoad, savedPreserveDist, wasAtBottom);
+                                        applyTerminalScroll(bottom - top, firstLoad, savedPreserveDist, wasAtBottom, savedScrollY);
                                     }
                                 };
                                 tvTermScreen.addOnLayoutChangeListener(layoutListener);
@@ -4097,7 +4103,7 @@ public class MainActivity extends Activity {
                                     if (!layoutHandled[0] && tvTermScreen != null) {
                                         layoutHandled[0] = true;
                                         tvTermScreen.removeOnLayoutChangeListener(layoutListener);
-                                        applyTerminalScroll(tvTermScreen.getHeight(), firstLoad, savedPreserveDist, wasAtBottom);
+                                        applyTerminalScroll(tvTermScreen.getHeight(), firstLoad, savedPreserveDist, wasAtBottom, savedScrollY);
                                     }
                                 }, 120);
 
@@ -4118,16 +4124,19 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private void applyTerminalScroll(int newContentHeight, boolean firstLoad, int savedPreserveDist, boolean wasAtBottom) {
+    private void applyTerminalScroll(int newContentHeight, boolean firstLoad, int savedPreserveDist, boolean wasAtBottom, int savedScrollY) {
         if (scrollTermScreen == null) return;
+        boolean isTouching = (scrollTermScreen instanceof TerminalScrollView) && ((TerminalScrollView) scrollTermScreen).isUserTouching();
         if (firstLoad) {
             isFirstTerminalLoad = false;
             scrollTermScreen.post(() -> scrollTermScreen.fullScroll(View.FOCUS_DOWN));
         } else if (savedPreserveDist >= 0) {
             int targetScrollY = Math.max(0, newContentHeight - savedPreserveDist);
             scrollTermScreen.post(() -> scrollTermScreen.scrollTo(0, targetScrollY));
-        } else if (wasAtBottom) {
+        } else if (wasAtBottom && !isTouching) {
             scrollTermScreen.post(() -> scrollTermScreen.fullScroll(View.FOCUS_DOWN));
+        } else if (!wasAtBottom && !isTouching) {
+            scrollTermScreen.post(() -> scrollTermScreen.scrollTo(0, savedScrollY));
         }
     }
 

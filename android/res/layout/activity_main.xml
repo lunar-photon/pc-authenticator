@@ -1129,7 +1129,7 @@
                     android:layout_marginBottom="3dp" />
 
                 <!-- Terminal Screen (Monospace, Console Box) -->
-                <ScrollView
+                <com.lunarphoton.pcauthenticator.TerminalScrollView
                     android:id="@+id/scroll_term_screen"
                     android:layout_width="match_parent"
                     android:layout_height="0dp"
@@ -1140,7 +1140,7 @@
                     android:fillViewport="true"
                     android:layout_marginBottom="4dp">
 
-                    <HorizontalScrollView
+                    <com.lunarphoton.pcauthenticator.TerminalHorizontalScrollView
                         android:id="@+id/hscroll_term_screen"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -1158,8 +1158,8 @@
                             android:textColor="#E2E8F0"
                             android:textIsSelectable="true"
                             android:text="Connecting to terminal..." />
-                    </HorizontalScrollView>
-                </ScrollView>
+                    </com.lunarphoton.pcauthenticator.TerminalHorizontalScrollView>
+                </com.lunarphoton.pcauthenticator.TerminalScrollView>
 
                 <!-- Quick Keys Toolbar (Single Sleek Row - No Swiping) -->
                 <LinearLayout
