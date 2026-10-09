@@ -487,6 +487,16 @@ session     include     system-login
 EOF
     chmod 644 /etc/pam.d/sddm
 
+    echo -e "${CYAN}[*] Configuring display manager startup ordering for cold boot...${NC}"
+    mkdir -p /etc/systemd/system/plasmalogin.service.d
+    cat <<'EOF' > /etc/systemd/system/plasmalogin.service.d/override.conf
+[Unit]
+Wants=user@1000.service
+After=user@1000.service
+EOF
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    echo -e "${GREEN}[✓] Plasma Login Manager ordered after background authenticator service.${NC}"
+
     echo -e "\n${GREEN}${BOLD}==========================================================${NC}"
     echo -e "${GREEN}${BOLD} [✓] Passwordless Mobile Unlock Successfully Installed!   ${NC}"
     echo -e "${GREEN}${BOLD}==========================================================${NC}"
@@ -555,6 +565,16 @@ session     include     system-login
 EOF
     chmod 644 /etc/pam.d/sddm
 
+    echo -e "${CYAN}[*] Configuring display manager startup ordering for cold boot...${NC}"
+    mkdir -p /etc/systemd/system/plasmalogin.service.d
+    cat <<'EOF' > /etc/systemd/system/plasmalogin.service.d/override.conf
+[Unit]
+Wants=user@1000.service
+After=user@1000.service
+EOF
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    echo -e "${GREEN}[✓] Plasma Login Manager ordered after background authenticator service.${NC}"
+
     echo -e "\n${GREEN}${BOLD}==========================================================${NC}"
     echo -e "${GREEN}${BOLD} [✓] Strict 2FA Mode Successfully Installed!              ${NC}"
     echo -e "${GREEN}${BOLD}==========================================================${NC}"
@@ -577,6 +597,14 @@ revert_to_password() {
             echo -e "${GREEN}[✓] Removed custom $pam_file hook.${NC}"
         fi
     done
+
+    # Remove display manager systemd override
+    if [ -f /etc/systemd/system/plasmalogin.service.d/override.conf ]; then
+        rm -f /etc/systemd/system/plasmalogin.service.d/override.conf
+        rmdir /etc/systemd/system/plasmalogin.service.d 2>/dev/null || true
+        systemctl daemon-reload >/dev/null 2>&1 || true
+        echo -e "${GREEN}[✓] Removed display manager systemd override.${NC}"
+    fi
 
     # Remove binary
     if [ -f /usr/local/bin/lockscreen-auth-check ]; then
