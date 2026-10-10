@@ -61,36 +61,22 @@ RestartSec=3
 [Install]
 WantedBy=default.target
 EOF
-        cat <<EOF > "$SERVICE_DIR/pc-connect-tray.service"
-[Unit]
-Description=PC Connect System Tray & Laser Pointer Overlay
-After=network.target pc-authenticator.service
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/python3 $TARGET_HOME/.local/bin/pc-connect-tray
-Restart=always
-RestartSec=3
-Environment=PYTHONUNBUFFERED=1
-
-[Install]
-WantedBy=default.target
-EOF
+        # Remove legacy duplicate pc-connect-tray.service if present
+        if [ -f "$SERVICE_DIR/pc-connect-tray.service" ]; then
+            sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$TARGET_UID" systemctl --user stop pc-connect-tray.service >/dev/null 2>&1 || true
+            sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$TARGET_UID" systemctl --user disable pc-connect-tray.service >/dev/null 2>&1 || true
+            rm -f "$SERVICE_DIR/pc-connect-tray.service"
+        fi
         chown -R "$TARGET_USER:$TARGET_USER" "$SERVICE_DIR"
         
         # Enable & start user services
         sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$TARGET_UID" systemctl --user daemon-reload >/dev/null 2>&1 || true
-        sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$TARGET_UID" systemctl --user enable pc-authenticator.service pc-connect-tray.service >/dev/null 2>&1 || true
-        sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$TARGET_UID" systemctl --user restart pc-authenticator.service pc-connect-tray.service >/dev/null 2>&1 || true
+        sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$TARGET_UID" systemctl --user enable pc-authenticator.service >/dev/null 2>&1 || true
+        sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$TARGET_UID" systemctl --user restart pc-authenticator.service >/dev/null 2>&1 || true
         loginctl enable-linger "$TARGET_USER" >/dev/null 2>&1 || true
         
         if sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$TARGET_UID" systemctl --user is-active --quiet pc-authenticator.service; then
             echo -e "${GREEN}[✓] Background daemon (pc-authenticator.service) is active.${NC}"
-        fi
-        if sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$TARGET_UID" systemctl --user is-active --quiet pc-connect-tray.service; then
-            echo -e "${GREEN}[✓] System tray service (pc-connect-tray.service) is active.${NC}"
-        else
-            echo -e "${YELLOW}[!] User services enabled. (Will start on next login if not active in current session).${NC}"
         fi
         
         # Also install global command symlinks ~/.local/bin/pc-auth, pc-connect, pc-connect-send, pc-connect-tray
@@ -99,8 +85,9 @@ EOF
         ln -sf "$SCRIPT_DIR/pc-connect" "$TARGET_HOME/.local/bin/pc-connect"
         ln -sf "$SCRIPT_DIR/pc-connect-send" "$TARGET_HOME/.local/bin/pc-connect-send"
         ln -sf "$SCRIPT_DIR/pc-connect-tray.py" "$TARGET_HOME/.local/bin/pc-connect-tray"
+        ln -sf "$SCRIPT_DIR/pc-connect-tray.py" "$TARGET_HOME/.local/bin/pc-connect-tray.py"
         ln -sf "$SCRIPT_DIR/kdeconnect-handler" "$TARGET_HOME/.local/bin/kdeconnect-handler"
-        chown -h "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.local/bin/pc-auth" "$TARGET_HOME/.local/bin/pc-connect" "$TARGET_HOME/.local/bin/pc-connect-send" "$TARGET_HOME/.local/bin/pc-connect-tray" "$TARGET_HOME/.local/bin/kdeconnect-handler" 2>/dev/null || true
+        chown -h "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.local/bin/pc-auth" "$TARGET_HOME/.local/bin/pc-connect" "$TARGET_HOME/.local/bin/pc-connect-send" "$TARGET_HOME/.local/bin/pc-connect-tray" "$TARGET_HOME/.local/bin/pc-connect-tray.py" "$TARGET_HOME/.local/bin/kdeconnect-handler" 2>/dev/null || true
 
         # Install Dolphin Context Menu
         mkdir -p "$TARGET_HOME/.local/share/kio/servicemenus"
@@ -115,7 +102,7 @@ EOF
         if [ -f "$SCRIPT_DIR/pc-connect-tray.desktop" ]; then
             cp -f "$SCRIPT_DIR/pc-connect-tray.desktop" "$TARGET_HOME/.config/autostart/pc-connect-tray.desktop"
             chown "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.config/autostart/pc-connect-tray.desktop" 2>/dev/null || true
-            chmod 755 "$TARGET_HOME/.config/autostart/pc-connect-tray.desktop"
+            chmod 644 "$TARGET_HOME/.config/autostart/pc-connect-tray.desktop"
         fi
         if [ -f "$SCRIPT_DIR/pc-connect.desktop" ]; then
             cp -f "$SCRIPT_DIR/pc-connect.desktop" "$TARGET_HOME/.local/share/applications/pc-connect.desktop"
@@ -638,7 +625,7 @@ show_status() {
         else
             echo -e " • Daemon Service:     ${RED}● Inactive (Stopped)${NC}"
         fi
-        if sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$TARGET_UID" systemctl --user is-active --quiet pc-connect-tray.service; then
+        if pgrep -u "$TARGET_USER" -f "pc-connect-tray" >/dev/null 2>&1; then
             echo -e " • Tray & Overlay:     ${GREEN}● Active (Running in background)${NC}"
         else
             echo -e " • Tray & Overlay:     ${RED}● Inactive (Stopped)${NC}"

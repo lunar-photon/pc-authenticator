@@ -9,6 +9,7 @@ import subprocess
 import time
 import tempfile
 import threading
+import fcntl
 
 from PyQt6.QtWidgets import (
     QApplication, QSystemTrayIcon, QMenu, QMainWindow, QWidget,
@@ -19,6 +20,21 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QSize
 from PyQt6.QtGui import QIcon, QAction, QFont, QColor, QDragEnterEvent, QDropEvent, QCursor
+
+LOCK_FILE = f"/run/user/{os.getuid()}/pc-connect-tray.lock" if os.path.exists(f"/run/user/{os.getuid()}") else os.path.expanduser("~/.config/pc-authenticator/tray.lock")
+_tray_lock_fd = None
+
+def acquire_single_instance_lock():
+    global _tray_lock_fd
+    try:
+        os.makedirs(os.path.dirname(LOCK_FILE), exist_ok=True)
+        _tray_lock_fd = open(LOCK_FILE, 'w')
+        fcntl.flock(_tray_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _tray_lock_fd.write(str(os.getpid()))
+        _tray_lock_fd.flush()
+        return True
+    except (IOError, OSError):
+        return False
 
 DAEMON_URL = "http://127.0.0.1:1760"
 
@@ -1096,6 +1112,9 @@ class PCConnectTrayApp:
         return self.app.exec()
 
 def main():
+    if not acquire_single_instance_lock():
+        print("[INFO] Another instance of PC Connect Tray is already running. Exiting.")
+        sys.exit(0)
     app = PCConnectTrayApp()
     sys.exit(app.run())
 
